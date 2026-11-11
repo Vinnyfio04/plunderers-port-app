@@ -1,0 +1,24 @@
+# Python generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Python environments and local configuration
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Frontend dependencies and build output
+node_modules/
+dist/
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local logs
+*.log
