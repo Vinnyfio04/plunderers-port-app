@@ -53,6 +53,7 @@ Obtain student approval before installing software or creating/changing a depend
 - Once a feature has a UI, it must start the required local services, open a browser, perform a real user operation, and compare the visible result with the expected result.
 - Check stored data when the operation is expected to persist or update data.
 - Document one command that runs the complete SmokeTest.
+- Run the current offline browser SmokeTest with `node scripts/smoke-test.mjs` from the project root. It starts and stops its own local services and browser.
 - Record failures as well as passes in `docs/verification.md`.
 
 ## AutoLoop

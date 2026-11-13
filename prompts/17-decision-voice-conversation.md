@@ -1,0 +1,5 @@
+# 17 — Two-way voice conversation for a saved paper decision
+
+Read README.md and AGENTS.md. Add a voice control in Vue for one selected saved paper-trading decision. Request microphone access on Start and use browser WebRTC media tracks for two-way speech. Send the browser SDP offer and decision ID to FastAPI. The backend reads that decision's analyst findings, reviewer verdict, Python check, and recorded paper outcome from SQLite and gives the GPT-Live session read-only context. The assistant should identify missing evidence beyond the record. Exchange the offer and session configuration at `POST /v1/live/sessions` using only the backend API key. Apply the SDP answer in Vue, play incoming audio, show microphone state, and release resources on End, disconnect, or failure. Follow CHECK, TAKE ACTION, VERIFY for dependencies. Verify the two requested spoken questions, compare answers to SQLite, check microphone release and denied/failed startup, and label mocked checks separately in `docs/verification.md`.
+
+Provider guide: https://developers.openai.com/api/docs/guides/voice-webrtc?voice-api=live

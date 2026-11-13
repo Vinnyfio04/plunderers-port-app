@@ -1,0 +1,3 @@
+# Two-role decision review
+
+Extend `POST /api/decisions` with separate analyst and reviewer instructions and model calls using the same frozen chart image and SQLite snapshot. Pass the analyst's actual named choices and backend supporting facts to the reviewer. Save both roles' outputs, models, verdict, and Python account/strategy check under one decision ID. A rejection, timeout, invalid response, or Python rule failure makes the proposal ineligible; this route never places an order. Verify fixed replies for agreement, reviewer rejection, and an unaffordable purchase accepted by both, then run a live two-call example and compare the browser with SQLite.
