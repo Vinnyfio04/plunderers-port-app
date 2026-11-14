@@ -3,6 +3,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import os
+import json
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +12,10 @@ from fastapi import WebSocket
 from backend.candle_aggregation import aggregate_ticker
 from backend.market_store import DEFAULT_DATABASE, MarketRecorder, describe_source_time
 from backend.paper_trading import PaperAccount, dollars_to_cents
-from backend.timeframe_history import MinuteRecord, Timeframe, aggregate_timeframe
+from backend.timeframe_history import Timeframe
 from backend.yahoo_stream import listen_for_updates
+from backend.recorded_history import recorded_history
+from backend.yahoo_history import market_status, initialize
 
 
 YAHOO_SOURCE = "Yahoo Finance"
@@ -24,6 +27,7 @@ class CandleClient:
     websocket: WebSocket
     symbol: str
     timeframe: Timeframe
+    sent: dict | None = None
 
 
 class CandleHub:
@@ -38,6 +42,7 @@ class CandleHub:
             str(DEFAULT_DATABASE),
         )
         self.database_path = Path(configured_database).expanduser().resolve()
+        initialize(self.database_path)
         self.test_feed = (
             test_feed
             if test_feed is not None
@@ -48,6 +53,13 @@ class CandleHub:
         self.tasks: dict[str, asyncio.Task[None]] = {}
         self.feed_status: dict[str, str] = {}
         self._next_client_id = 1
+        self.clock_task = None
+        with MarketRecorder(self.database_path) as recorder:
+            recorder.connection.execute('''CREATE TABLE IF NOT EXISTS candle_states (
+                state_id INTEGER PRIMARY KEY, ticker TEXT NOT NULL, interval TEXT NOT NULL,
+                timestamp TEXT NOT NULL, evaluated_at TEXT NOT NULL, candle_json TEXT NOT NULL,
+                completion_json TEXT NOT NULL, UNIQUE(ticker, interval, timestamp, candle_json, completion_json))''')
+            recorder.connection.commit()
 
     async def add_client(
         self,
@@ -59,6 +71,15 @@ class CandleHub:
         client_id = self._next_client_id
         self._next_client_id += 1
         self.clients[client_id] = CandleClient(websocket, symbol, timeframe)
+        if not self.test_feed:
+            initial = recorded_history(self.database_path, symbol, timeframe)
+            self.clients[client_id].sent = {
+                c['timestamp']: json.dumps([c, s], sort_keys=True)
+                for c, s in zip(initial['candles'], initial['status'])}
+            await self._send_json(client_id, {'type': 'history', 'symbol': symbol,
+                'interval': timeframe, **initial})
+        if not self.test_feed and (self.clock_task is None or self.clock_task.done()):
+            self.clock_task = asyncio.create_task(self._clock())
         await self._send_status(
             client_id,
             self.feed_status.get(symbol, "connecting"),
@@ -82,6 +103,10 @@ class CandleHub:
             self.feed_status[client.symbol] = "stopped"
 
     async def close(self) -> None:
+        if self.clock_task:
+            self.clock_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self.clock_task
         tasks = list(self.tasks.values())
         self.tasks.clear()
         for task in tasks:
@@ -90,6 +115,43 @@ class CandleHub:
             with suppress(asyncio.CancelledError):
                 await task
         self.clients.clear()
+
+    async def _clock(self):
+        cycles = 0
+        while True:
+            await asyncio.sleep(1)
+            cycles += 1
+            for symbol in {client.symbol for client in self.clients.values()}:
+                await self.broadcast_candles(symbol, datetime.now(timezone.utc), YAHOO_SOURCE)
+                if cycles % 30 == 0:
+                    await self._broadcast_status(symbol, self.feed_status.get(symbol, 'connecting'), YAHOO_SOURCE)
+
+    async def broadcast_candles(self, symbol, now, source, storage=None, source_time=None, source_age=None):
+        for client_id, client in list(self.clients.items()):
+            if client.symbol != symbol:
+                continue
+            result = recorded_history(self.database_path, symbol, client.timeframe, now)
+            if client.sent is None:
+                client.sent = {}
+            for candle, completion in zip(result['candles'], result['status']):
+                state = json.dumps([candle, completion], sort_keys=True)
+                if client.sent.get(candle['timestamp']) == state:
+                    continue
+                client.sent[candle['timestamp']] = state
+                with MarketRecorder(self.database_path) as recorder:
+                    recorder.connection.execute('''INSERT OR IGNORE INTO candle_states
+                        (ticker, interval, timestamp, evaluated_at, candle_json, completion_json)
+                        VALUES (?,?,?,?,?,?)''', (symbol, client.timeframe, candle['timestamp'],
+                        now.isoformat(), json.dumps(candle, sort_keys=True), json.dumps(completion, sort_keys=True)))
+                    recorder.connection.commit()
+                await self._send_json(client_id, {
+                    'type': 'candle', 'symbol': symbol, 'interval': client.timeframe,
+                    'source': source, 'feed_status': self.feed_status.get(symbol, 'connecting'),
+                    'source_time': source_time, 'source_age_seconds': source_age,
+                    'backend_receipt_time': now.isoformat(), 'storage': storage,
+                    'completion': completion, 'candle': candle,
+                    'market': result['market'], 'history_fetch': result['history_fetch'],
+                })
 
     async def _run_feed(self, symbol: str) -> None:
         if self.test_feed:
@@ -190,48 +252,8 @@ class CandleHub:
             )
             return
 
-        minute_records = [
-            MinuteRecord(candle=candle, available_at=receipt_time)
-            for candle in one_minute.candles
-        ]
-        for client_id, client in list(self.clients.items()):
-            if client.symbol != symbol:
-                continue
-            aggregated = aggregate_timeframe(
-                minute_records,
-                timeframe=client.timeframe,
-                as_of=receipt_time,
-            )
-            if not aggregated["candles"]:
-                continue
-            candle = aggregated["candles"][-1]
-            completion = aggregated["status"][-1]
-            await self._send_json(
-                client_id,
-                {
-                    "type": "candle",
-                    "symbol": symbol,
-                    "interval": client.timeframe,
-                    "source": source,
-                    "feed_status": "live",
-                    "source_time": source_time,
-                    "backend_receipt_time": receipt_time.isoformat().replace(
-                        "+00:00",
-                        "Z",
-                    ),
-                    "source_age_seconds": source_age,
-                    "storage": storage,
-                    "completion": {
-                        "interval_ended": completion["interval_ended"],
-                        "coverage_complete": completion["coverage_complete"],
-                        "volume_known": completion["volume_known"],
-                        "available_minutes": completion["available_minutes"],
-                        "expected_minutes": completion["expected_minutes"],
-                    },
-                    "candle": candle,
-                },
-            )
         self.feed_status[symbol] = "live"
+        await self.broadcast_candles(symbol, receipt_time, source, storage, source_time, source_age)
 
     async def _run_test_feed(self, symbol: str) -> None:
         await self._broadcast_status(symbol, "connected", TEST_SOURCE)
@@ -300,6 +322,9 @@ class CandleHub:
         client = self.clients.get(client_id)
         if client is None:
             return
+        with MarketRecorder(self.database_path) as recorder:
+            latest_fetch = recorder.connection.execute('''SELECT status, fetched_at, message FROM yahoo_history_fetches
+                WHERE ticker=? ORDER BY fetch_id DESC LIMIT 1''', (client.symbol,)).fetchone()
         await self._send_json(
             client_id,
             {
@@ -311,6 +336,8 @@ class CandleHub:
                 "detail": detail,
                 "source_time": source_time,
                 "source_age_seconds": source_age_seconds,
+                "market": market_status(),
+                "history_fetch": dict(latest_fetch) if latest_fetch else None,
             },
         )
 

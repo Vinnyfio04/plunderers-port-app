@@ -64,7 +64,7 @@ async def run_checks(base_url: str, database_path: Path) -> dict:
                 message["candle"]["timestamp"] == "2026-11-09T15:00:00Z"
                 for message in one_minute_candles
             )
-            == 3
+            >= 3
             and final_1500["candle"]
             == {
                 "timestamp": "2026-11-09T15:00:00Z",

@@ -78,6 +78,11 @@ createApp({
     const status = ref('Loading 1m candles…')
     const error = ref('')
     const source = ref('Local synthetic history')
+    const historyKind = ref('recorded')
+    const marketState = ref(null)
+    const historyFetch = ref(null)
+    const liveCandleSource = ref(null)
+    const lastLiveCandleTime = ref(null)
     const feedStatus = ref('connecting')
     const feedDetail = ref('')
     const backendSocketStatus = ref('connecting')
@@ -85,6 +90,7 @@ createApp({
     const completion = ref(null)
     const candleStatusByTime = ref({})
     const replaySelections = ref([])
+    const watchlistError = ref('')
     const replayStart = ref('')
     const replayEnd = ref('')
     const replayObservationTime = ref(null)
@@ -514,6 +520,16 @@ createApp({
         if (generation !== requestGeneration) return
         const message = JSON.parse(event.data)
         if (message.symbol !== symbol.value || message.interval !== timeframe.value) return
+        if (message.market) marketState.value = message.market
+        if (message.history_fetch) historyFetch.value = message.history_fetch
+        if (message.type === 'history') {
+          resetChart(message.candles, message.status)
+          for (const item of message.status) {
+            if (item.interval_ended) automationSeen.add(`${symbol.value}|${timeframe.value}|${item.timestamp}`)
+          }
+          chartAdapter?.setIndicators(indicators.value)
+          return
+        }
         source.value = message.source
         feedStatus.value = message.feed_status
         feedDetail.value = message.detail ?? ''
@@ -523,6 +539,8 @@ createApp({
           sourceAgeSeconds.value = sourceAgeBase
         }
         if (message.type === 'candle') {
+          liveCandleSource.value = message.source
+          lastLiveCandleTime.value = message.candle.timestamp
           const wasEnded = candleStatusByTime.value[message.candle.timestamp]?.interval_ended
           completion.value = message.completion
           candleStatusByTime.value = {
@@ -532,14 +550,15 @@ createApp({
           replaceOrAppendCandle(message.candle)
           if (message.completion?.interval_ended && !wasEnded) automateCompleted(message.candle)
           status.value = `${candles.value.length} ${timeframe.value} candles · UTC`
+          loadIndicators(generation).catch((failure) => { indicatorError.value = failure.message })
           loadPaperAccount()
         }
       })
       activeSocket.addEventListener('error', () => {
-        if (generation === requestGeneration) backendSocketStatus.value = 'error'
+        if (generation === requestGeneration) { backendSocketStatus.value = 'error'; feedStatus.value = 'unavailable' }
       })
       activeSocket.addEventListener('close', () => {
-        if (generation === requestGeneration) backendSocketStatus.value = 'disconnected'
+        if (generation === requestGeneration) { backendSocketStatus.value = 'disconnected'; feedStatus.value = 'unavailable' }
       })
     }
 
@@ -721,6 +740,8 @@ createApp({
       feedStatus.value = 'connecting'
       feedDetail.value = ''
       source.value = 'Local synthetic history'
+      liveCandleSource.value = null
+      lastLiveCandleTime.value = null
       replayObservationTime.value = null
       sourceAgeBase = null
       sourceAgeMeasuredAt = null
@@ -733,8 +754,16 @@ createApp({
         const historyResponse = await response.json()
         if (generation !== requestGeneration) return
         const history = historyResponse.candles
-        if (!Array.isArray(history) || history.length === 0) {
-          throw new Error('History response did not contain any candles')
+        if (!Array.isArray(history)) throw new Error('Invalid candle history response')
+        historyKind.value = historyResponse.data_kind ?? 'test'
+        marketState.value = historyResponse.market ?? null
+        historyFetch.value = historyResponse.history_fetch ?? null
+        source.value = historyResponse.source ?? 'TEST DATA — configured CSV fixture'
+        feedDetail.value = historyResponse.volume_note ?? 'Explicit test fixture; not live market history.'
+        if (historyResponse.latest_source_time) {
+          sourceAgeBase = Math.max(0, (Date.now() - Date.parse(historyResponse.latest_source_time)) / 1000)
+          sourceAgeMeasuredAt = Date.now()
+          sourceAgeSeconds.value = sourceAgeBase
         }
         completion.value = historyResponse.status[historyResponse.status.length - 1]
         resetChart(history, historyResponse.status)
@@ -746,8 +775,13 @@ createApp({
             if (item.interval_ended) automationSeen.add(`${symbol.value}|${timeframe.value}|${item.timestamp}`)
           }
         }
-        status.value = `${history.length} ${historyResponse.timeframe} candles · UTC`
-        connectCandleStream(generation)
+        status.value = history.length ? `${history.length} ${historyResponse.timeframe} candles · UTC`
+          : 'No recorded candles · waiting for feed'
+        if (historyResponse.live_feed_enabled === false) {
+          socket?.close()
+          backendSocketStatus.value = 'disconnected'
+          feedStatus.value = 'disabled'
+        } else connectCandleStream(generation)
       } catch (requestError) {
         if (generation === requestGeneration) {
           error.value = requestError.message
@@ -768,7 +802,18 @@ createApp({
       replayStoredCount.value = selection.observations
     }
 
-    const loadReplaySelections = async () => {
+    const loadWatchlist = async () => {
+      try {
+        const response = await fetch('/api/replay/selections')
+        if (!response.ok) throw new Error('Recorded symbols are unavailable.')
+        replaySelections.value = (await response.json()).selections
+        watchlistError.value = ''
+      } catch (requestError) {
+        watchlistError.value = requestError.message
+      }
+    }
+
+    const loadReplaySelections = async (preferredSymbol = null) => {
       const generation = ++requestGeneration
       socket?.close()
       mode.value = 'replay'
@@ -794,7 +839,10 @@ createApp({
           status.value = 'No replay data'
           return
         }
-        applyReplaySelection(payload.selections[0].ticker)
+        applyReplaySelection(
+          payload.selections.find((item) => item.ticker === preferredSymbol)?.ticker
+            ?? payload.selections[0].ticker,
+        )
         await loadIndicators(generation)
         status.value = 'Choose a saved range, then start Replay'
       } catch (requestError) {
@@ -891,6 +939,7 @@ createApp({
 
     onMounted(() => {
       loadDashboard('1m')
+      loadWatchlist()
       loadSavedDecisions()
       ageTimer = window.setInterval(() => {
         if (sourceAgeBase !== null && sourceAgeMeasuredAt !== null) {
@@ -912,9 +961,10 @@ createApp({
     return () => {
       const selected = selectedCandle.value
       const displayTime = selected ? formatCandleTimestamp(selected.timestamp) : null
-      const candleState = completion.value
-        ? completion.value.interval_ended
-          ? completion.value.coverage_complete
+      const inspectedCompletion = selected ? candleStatusByTime.value[selected.timestamp] : completion.value
+      const candleState = inspectedCompletion
+        ? inspectedCompletion.interval_ended
+          ? inspectedCompletion.coverage_complete
             ? 'Complete'
             : 'Ended · partial coverage'
           : 'Still forming'
@@ -922,6 +972,10 @@ createApp({
       const replayTime = replayObservationTime.value
         ? `${formatCandleTimestamp(replayObservationTime.value).date} ${formatCandleTimestamp(replayObservationTime.value).time}`
         : 'Waiting for Replay'
+      const latestCandleTime = candles.value.at(-1)?.timestamp
+      const latestCandleLabel = latestCandleTime
+        ? `${formatCandleTimestamp(latestCandleTime).date} ${formatCandleTimestamp(latestCandleTime).time}`
+        : 'Unavailable'
       const selectedIndicatorValues = selected
         ? indicators.value.map((instance) => ({
             ...instance,
@@ -1029,6 +1083,35 @@ createApp({
           ? h('p', { class: 'valuation-unavailable', 'data-testid': 'valuation-unavailable' },
               account.valuation?.message ?? 'No usable valuation price is available for the open position.')
           : null,
+        h('div', { class: 'automation-box' }, [
+          h('div', { class: 'section-subheading' }, [
+            h('h3', 'Paper automation'),
+            h('span', { class: automation.value?.enabled ? 'state-badge state-on' : 'state-badge' },
+              automation.value?.enabled ? 'Running' : 'Stopped'),
+          ]),
+          h('p', 'Approved decisions can create pending paper orders for the next observed price.'),
+          h('label', { class: 'compact-field' }, [
+            'Order size (whole shares)',
+            h('input', { type: 'number', min: '1', step: '1', value: automationSize.value,
+              'aria-label': 'Automation order size',
+              onInput: (event) => { automationSize.value = event.target.value } }),
+          ]),
+          h('div', { class: 'paper-actions' }, [
+            h('button', { type: 'button', disabled: automation?.value?.enabled || mode.value !== 'live',
+              onClick: () => setAutomation(true) }, 'Start paper automation'),
+            h('button', { type: 'button', disabled: !automation?.value?.enabled,
+              onClick: () => setAutomation(true) }, 'Update order size'),
+            h('button', { type: 'button', disabled: !automation?.value?.enabled,
+              onClick: () => setAutomation(false) }, 'Stop paper automation'),
+          ]),
+          h('p', `Account ${automation.value?.account_id ?? 1} · ${symbol.value} ${timeframe.value}`),
+          automationError.value ? h('p', { class: 'error', role: 'alert' }, automationError.value) : null,
+          automationEvent.value ? h('div', { class: 'automation-trace', 'data-testid': 'automation-trace' }, [
+            h('p', `Candle: ${automationEvent.value.candle_utc} · decision: ${automationEvent.value.decision_id ?? 'analysis failed'} · ${automationEvent.value.status}`),
+            h('p', automationEvent.value.reason ?? `Paper order: ${automationEvent.value.order_id ?? 'none'}`),
+            automationEvent.value.order_id ? h('p', `Fill: ${paperAccount.value?.orders?.find((order) => order.order_id === automationEvent.value.order_id)?.fill?.fill_id ?? 'pending'} · cash: ${paperAccount.value?.cash ?? 'loading'} · shares: ${paperAccount.value?.shares ?? 'loading'}`) : null,
+          ]) : null,
+        ]),
         h('div', { class: 'paper-controls' }, [
           h('label', [
             h('span', 'Request ID'),
@@ -1186,28 +1269,8 @@ createApp({
             'data-testid': 'ask-about-chart',
           }, decisionLoading.value ? 'Analyzing…' : 'Ask about chart'),
         ]),
-        h('p', 'The manual question freezes a completed chart for advice. Start paper automation separately to submit eligible reviewed decisions.'),
-        h('div', { class: 'paper-actions' }, [
-          h('label', [
-            'Order size (whole shares) ',
-            h('input', { type: 'number', min: '1', step: '1', value: automationSize.value,
-              'aria-label': 'Automation order size',
-              onInput: (event) => { automationSize.value = event.target.value } }),
-          ]),
-          h('button', { type: 'button', disabled: automation?.value?.enabled || mode.value !== 'live',
-            onClick: () => setAutomation(true) }, 'Start paper automation'),
-          h('button', { type: 'button', disabled: !automation?.value?.enabled,
-            onClick: () => setAutomation(true) }, 'Update order size'),
-          h('button', { type: 'button', disabled: !automation?.value?.enabled,
-            onClick: () => setAutomation(false) }, 'Stop paper automation'),
-        ]),
+        h('p', 'Freeze a completed chart for advisory analysis. The paper account is managed separately.'),
         h('p', `Paper automation: ${automation.value?.enabled ? 'running' : 'stopped'} · account ${automation.value?.account_id ?? 1} · ${symbol.value} ${timeframe.value}`),
-        automationError.value ? h('p', { class: 'error', role: 'alert' }, automationError.value) : null,
-        automationEvent.value ? h('div', { 'data-testid': 'automation-trace' }, [
-          h('p', `Candle: ${automationEvent.value.candle_utc} · decision: ${automationEvent.value.decision_id ?? 'analysis failed'} · ${automationEvent.value.status}`),
-          h('p', automationEvent.value.reason ?? `Paper order: ${automationEvent.value.order_id ?? 'none'}`),
-          automationEvent.value.order_id ? h('p', `Fill: ${paperAccount.value?.orders?.find((order) => order.order_id === automationEvent.value.order_id)?.fill?.fill_id ?? 'pending'} · cash: ${paperAccount.value?.cash ?? 'loading'} · shares: ${paperAccount.value?.shares ?? 'loading'}`) : null,
-        ]) : null,
         decisionError.value
           ? h('p', { class: 'error', role: 'alert', 'data-testid': 'decision-error' }, decisionError.value)
           : null,
@@ -1308,104 +1371,183 @@ createApp({
         ]),
       ])
 
+      const watchlistPanel = h('section', { class: 'watchlist-panel', 'aria-label': 'Watchlist symbols' }, [
+        h('p', { class: 'sidebar-note' }, 'Symbols available from this local workspace.'),
+        h('p', { class: 'watchlist-group' }, 'LIVE / HISTORY'),
+        h('button', { type: 'button', class: `watchlist-row ${mode.value === 'live' ? 'is-selected' : ''}`,
+          onClick: () => loadDashboard(timeframe.value) }, [
+          h('span', { class: 'symbol-mark' }, 'A'),
+          h('span', { class: 'watchlist-name' }, [h('strong', 'AAPL'), h('small', 'Apple · local history')]),
+          h('span', { class: 'watchlist-value' }, selected && mode.value === 'live' ? String(selected.close) : 'Open'),
+        ]),
+        h('p', { class: 'watchlist-group' }, 'RECORDED SESSIONS'),
+        replaySelections.value.length
+          ? replaySelections.value.map((item) => h('button', {
+              type: 'button',
+              class: `watchlist-row ${mode.value === 'replay' && symbol.value === item.ticker ? 'is-selected' : ''}`,
+              onClick: () => loadReplaySelections(item.ticker),
+            }, [
+              h('span', { class: 'symbol-mark recorded-mark' }, 'R'),
+              h('span', { class: 'watchlist-name' }, [h('strong', item.ticker), h('small', 'Saved replay')]),
+              h('span', { class: 'watchlist-value' }, `${item.observations} rows`),
+            ]))
+          : h('p', { class: 'sidebar-note' }, watchlistError.value || 'No recorded symbols yet.'),
+      ])
+
       return h('main', { class: 'market-shell' }, [
         h('header', { class: 'market-header' }, [
-          h('div', [
-            h('p', { class: 'eyebrow' }, 'Live Market Workplace'),
-            h('h1', mode.value === 'replay' ? `${symbol.value} Replay` : `${symbol.value} market candles`),
-            h('p', { class: 'lede' }, mode.value === 'replay'
-              ? 'Recorded SQLite observations replayed in their original backend receipt order.'
-              : 'Exchange-session history and live Yahoo observations aggregated by the Python backend.'),
+          h('div', { class: 'brand-lockup' }, [
+            h('span', { class: 'brand-mark', 'aria-hidden': 'true' }, 'M'),
+            h('span', { class: 'brand-name' }, 'Market Workplace'),
           ]),
           h('div', { class: 'header-controls' }, [
-            h('label', { class: 'timeframe-picker' }, [
-              h('span', 'Mode'),
-              h('select', {
-                'aria-label': 'Select dashboard mode',
-                value: mode.value,
-                onChange: (event) => event.target.value === 'replay' ? loadReplaySelections() : loadDashboard(timeframe.value),
-              }, [h('option', { value: 'live' }, 'Live'), h('option', { value: 'replay' }, 'Replay')]),
+            h('div', { class: 'toolbar-symbol' }, [
+              h('strong', symbol.value),
+              h('span', mode.value === 'replay' ? 'Recorded session' : 'Market chart'),
             ]),
             h('label', { class: 'timeframe-picker' }, [
-              h('span', 'Timeframe'),
+              h('span', 'Interval'),
               h('select', {
                 'aria-label': 'Select chart timeframe',
                 value: timeframe.value,
                 onChange: (event) => changeTimeframe(event.target.value),
               }, TIMEFRAMES.map(([value, label]) => h('option', { value }, label))),
             ]),
-            h('p', { class: 'status-chip', 'aria-live': 'polite' }, status.value),
-          ]),
-        ]),
-        replayControls,
-        paperPanel,
-        indicatorPanel,
-        decisionPanel,
-        h('section', { class: 'feed-panel', 'aria-label': 'Feed status' }, [
-          feedItem('Mode', mode.value === 'replay' ? 'Replay · read only' : 'Live', 'feed-mode'),
-          feedItem('Symbol', symbol.value, 'feed-symbol'),
-          feedItem('Interval', timeframe.value, 'feed-interval'),
-          feedItem('Source', source.value, 'feed-source'),
-          feedItem(mode.value === 'replay' ? 'Replay observation' : 'Source age', mode.value === 'replay' ? replayTime : formatAge(sourceAgeSeconds.value), 'feed-age'),
-          feedItem('Upstream feed', feedStatus.value, 'feed-status'),
-          feedItem('FastAPI socket', backendSocketStatus.value, 'socket-status'),
-          feedItem('Candle', candleState, 'candle-state'),
-          mode.value === 'replay' ? feedItem('Replay progress', replayProgress.value, 'replay-progress') : null,
-          mode.value === 'replay' ? feedItem('Stored observations', replayStoredCount.value ?? 'Unknown', 'replay-count') : null,
-        ].filter(Boolean)),
-        mode.value === 'replay' && replayReceiptTime.value
-          ? h('p', { class: 'receipt-time', 'data-testid': 'replay-receipt-time' }, `Original backend receipt time: ${replayReceiptTime.value}`)
-          : null,
-        feedDetail.value ? h('p', { class: 'feed-detail', 'data-testid': 'feed-detail' }, feedDetail.value) : null,
-        error.value ? h('p', { class: 'error', role: 'alert' }, error.value) : null,
-        h('section', { class: 'chart-panel', 'aria-label': mode.value === 'replay' ? 'Replay chart' : 'Market chart' }, [
-          mode.value === 'replay' ? h('div', { class: 'chart-mode-banner' }, 'Replay') : null,
-          h('div', { ref: chartContainer, class: 'chart-container', 'data-testid': 'market-chart' }),
-        ]),
-        h('section', { class: 'inspector', 'aria-labelledby': 'inspector-title' }, [
-          h('div', { class: 'inspector-heading' }, [
-            h('div', [h('p', { class: 'eyebrow' }, 'Crosshair details'), h('h2', { id: 'inspector-title' }, 'Inspect a candle')]),
-            h('label', { class: 'minute-picker' }, [
-              h('span', 'UTC candle'),
+            h('button', { class: 'toolbar-button', type: 'button', onClick: () => {
+              const dock = document.querySelector('.indicator-dock')
+              if (dock) { dock.open = true; dock.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }
+            } }, `Indicators · ${indicators.value.length}`),
+            h('label', { class: 'timeframe-picker mode-picker' }, [
+              h('span', 'Workspace'),
               h('select', {
-                'aria-label': 'Inspect candle by UTC timestamp',
-                value: selected?.timestamp ?? '',
-                onChange: (event) => selectCandle(event.target.value),
-              }, candles.value.map((candle) => h('option', { value: candle.timestamp }, candle.timestamp))),
+                'aria-label': 'Select dashboard mode',
+                value: mode.value,
+                onChange: (event) => event.target.value === 'replay' ? loadReplaySelections() : loadDashboard(timeframe.value),
+              }, [h('option', { value: 'live' }, 'Live'), h('option', { value: 'replay' }, 'Replay')]),
             ]),
           ]),
-          selected
-            ? h('div', [
-                h('dl', { class: 'detail-grid', 'data-testid': 'candle-details' }, [
-                  detailItem('Date', displayTime.date, 'detail-date'),
-                  detailItem('Time', displayTime.time, 'detail-time'),
-                  detailItem('Open', selected.open, 'detail-open'),
-                  detailItem('High', selected.high, 'detail-high'),
-                  detailItem('Low', selected.low, 'detail-low'),
-                  detailItem('Close', selected.close, 'detail-close'),
-                  detailItem('Volume', selected.volume === null ? 'Unknown' : `${selected.volume} shares`, 'detail-volume'),
+          h('p', { class: 'status-chip', 'aria-live': 'polite' }, status.value),
+        ]),
+        h('div', { class: 'workspace-grid' }, [
+          h('aside', { class: 'workspace-sidebar', 'aria-label': 'Market tools' }, [
+            h('div', { class: 'sidebar-topline' }, [
+              h('span', 'WORKSPACE'),
+              h('strong', mode.value === 'replay' ? 'Replay' : 'Live market'),
+            ]),
+            h('details', { class: 'sidebar-section', open: true }, [
+              h('summary', [h('span', 'Watchlist'), h('small', `${1 + replaySelections.value.length}`)]),
+              watchlistPanel,
+            ]),
+            h('details', { class: 'sidebar-section', open: true }, [
+              h('summary', [h('span', 'Decision Analysis'), h('small', 'Advisory')]),
+              decisionPanel,
+            ]),
+            h('details', { class: 'sidebar-section', open: true }, [
+              h('summary', [h('span', 'Paper Trading'), h('small', 'Simulation')]),
+              paperPanel,
+            ]),
+          ]),
+          h('div', { class: 'workspace-main' }, [
+            h('div', { class: 'instrument-strip' }, [
+              h('div', [
+                h('p', { class: 'eyebrow' }, mode.value === 'replay'
+                  ? 'RECORDED MARKET SESSION'
+                  : liveCandleSource.value
+                    ? `${liveCandleSource.value.toUpperCase()} OBSERVATIONS`
+                    : historyKind.value === 'recorded' ? 'RECORDED MARKET OBSERVATIONS' : 'LABELED TEST FIXTURE'),
+                h('h1', `${symbol.value} ${mode.value === 'replay' ? 'Replay' : 'Chart'}`),
+              ]),
+              selected ? h('div', { class: 'ohlc-strip' }, [
+                h('span', `O ${selected.open}`), h('span', `H ${selected.high}`),
+                h('span', `L ${selected.low}`), h('strong', {
+                  class: selected.close >= selected.open ? 'price-up' : 'price-down',
+                }, `C ${selected.close}`),
+                h('span', `Vol ${selected.volume === null ? 'Unknown' : selected.volume}`),
+              ]) : null,
+              h('span', { class: completion.value?.interval_ended ? 'state-badge' : 'state-badge state-on' }, candleState),
+            ]),
+            replayControls,
+            mode.value === 'live' && candles.value.length
+              ? h('p', { class: 'sample-notice', 'data-testid': 'history-freshness', role: 'status' },
+                  liveCandleSource.value
+                    ? `Latest candle: ${latestCandleLabel}. Completed minutes reconcile with Yahoo reported OHLCV; provisional volume may be unknown.`
+                    : `Yahoo recorded history: latest candle ${latestCandleLabel}. ${marketState.value?.label ?? 'Waiting for feed'}.`)
+              : null,
+            mode.value === 'live' && marketState.value
+              ? h('p', { class: 'market-session-notice', 'data-testid': 'market-session' },
+                  `${marketState.value.label} · Regular session · Next open ${marketState.value.next_open}. Prices retain their source timestamps.`) : null,
+            historyFetch.value?.status === 'unavailable'
+              ? h('p', { class: 'error', role: 'status', 'data-testid': 'history-fetch-error' }, historyFetch.value.message) : null,
+            mode.value === 'live' && !candles.value.length
+              ? h('p', { class: 'sample-notice', role: 'status' }, 'No recorded regular-session candles. Waiting for live observations; try Replay to inspect a saved session.') : null,
+            feedDetail.value ? h('p', { class: 'feed-detail', 'data-testid': 'feed-detail' }, feedDetail.value) : null,
+            error.value ? h('p', { class: 'error', role: 'alert' }, error.value) : null,
+            h('section', { class: 'chart-panel', 'aria-label': mode.value === 'replay' ? 'Replay chart' : 'Market chart' }, [
+              mode.value === 'replay' ? h('div', { class: 'chart-mode-banner' }, 'Replay · recorded observations') : null,
+              h('div', { ref: chartContainer, class: 'chart-container', 'data-testid': 'market-chart' }),
+            ]),
+            h('section', { class: 'feed-panel', 'aria-label': 'Feed status' }, [
+              feedItem('Mode', mode.value === 'replay' ? 'Replay · read only' : 'Live', 'feed-mode'),
+              feedItem('Symbol', symbol.value, 'feed-symbol'),
+              feedItem('Interval', timeframe.value, 'feed-interval'),
+              feedItem('Market session', marketState.value?.label ?? 'Fixture / replay', 'market-status'),
+              feedItem('Chart data', mode.value === 'replay' ? 'Recorded replay' : historyKind.value === 'recorded' ? 'Recorded market data' : 'TEST DATA'),
+              feedItem('Source', source.value, 'feed-source'),
+              feedItem(mode.value === 'replay' ? 'Replay observation' : 'Source age', mode.value === 'replay' ? replayTime : formatAge(sourceAgeSeconds.value), 'feed-age'),
+              feedItem('Upstream feed', feedStatus.value, 'feed-status'),
+              feedItem('FastAPI socket', backendSocketStatus.value, 'socket-status'),
+              feedItem('Candle', candleState, 'candle-state'),
+              mode.value === 'replay' ? feedItem('Replay progress', replayProgress.value, 'replay-progress') : null,
+              mode.value === 'replay' ? feedItem('Stored observations', replayStoredCount.value ?? 'Unknown', 'replay-count') : null,
+            ].filter(Boolean)),
+            mode.value === 'replay' && replayReceiptTime.value
+              ? h('p', { class: 'receipt-time', 'data-testid': 'replay-receipt-time' }, `Original backend receipt time: ${replayReceiptTime.value}`)
+              : null,
+            h('section', { class: 'inspector', 'aria-labelledby': 'inspector-title' }, [
+              h('div', { class: 'inspector-heading' }, [
+                h('div', [h('p', { class: 'eyebrow' }, 'CROSSHAIR DETAILS'), h('h2', { id: 'inspector-title' }, 'Inspect a candle')]),
+                h('label', { class: 'minute-picker' }, [
+                  h('span', 'UTC candle'),
+                  h('select', {
+                    'aria-label': 'Inspect candle by UTC timestamp',
+                    value: selected?.timestamp ?? '',
+                    onChange: (event) => selectCandle(event.target.value),
+                  }, candles.value.map((candle) => h('option', { value: candle.timestamp }, candle.timestamp))),
                 ]),
-                h('section', { class: 'indicator-values', 'aria-label': 'Indicator values' }, [
+              ]),
+              selected
+                ? h('div', [
+                    h('dl', { class: 'detail-grid', 'data-testid': 'candle-details' }, [
+                      detailItem('Date', displayTime.date, 'detail-date'),
+                      detailItem('Time', displayTime.time, 'detail-time'),
+                      detailItem('Open', selected.open, 'detail-open'),
+                      detailItem('High', selected.high, 'detail-high'),
+                      detailItem('Low', selected.low, 'detail-low'),
+                      detailItem('Close', selected.close, 'detail-close'),
+                      detailItem('Volume', selected.volume === null ? 'Unknown' : `${selected.volume} shares`, 'detail-volume'),
+                    ]),
+                    h('section', { class: 'indicator-values', 'aria-label': 'Indicator values' }, [
                       h('h3', 'Indicator values'),
                       selectedIndicatorValues.length
                         ? h('dl', { class: 'indicator-value-grid' }, selectedIndicatorValues.map((instance) =>
-                            detailItem(
-                              instance.name,
-                              instance.selectedValue === null
-                                ? 'Warm-up gap'
-                                : `${instance.selectedValue} ${instance.units}`,
-                              `indicator-value-${instance.indicator_id}`,
-                            ),
-                          ))
+                            detailItem(instance.name, instance.selectedValue === null
+                              ? 'Warm-up gap' : `${instance.selectedValue} ${instance.units}`,
+                            `indicator-value-${instance.indicator_id}`)))
                         : h('p', 'No indicators configured for this chart.'),
                     ]),
-              ])
-            : h('p', mode.value === 'replay' ? 'Start Replay to inspect its recorded candles.' : 'Move the crosshair over a candle or choose a timestamp.'),
-        ]),
-        h('footer', { class: 'attribution' }, [
-          h('p', 'TradingView Lightweight Charts™ Copyright (с) 2025 TradingView, Inc.'),
-          h('a', { href: 'https://www.tradingview.com/', target: '_blank', rel: 'noreferrer' }, 'Visit TradingView'),
-          h('a', { href: 'https://tradingview.github.io/lightweight-charts/docs', target: '_blank', rel: 'noreferrer' }, 'Lightweight Charts documentation'),
+                  ])
+                : h('p', mode.value === 'replay' ? 'Start Replay to inspect its recorded candles.' : 'Move the crosshair over a candle or choose a timestamp.'),
+            ]),
+            h('details', { class: 'indicator-dock', open: true }, [
+              h('summary', `Indicators · ${indicators.value.length} configured`),
+              indicatorPanel,
+            ]),
+            h('footer', { class: 'attribution' }, [
+              h('p', 'TradingView Lightweight Charts™ Copyright (с) 2025 TradingView, Inc.'),
+              h('a', { href: 'https://www.tradingview.com/', target: '_blank', rel: 'noreferrer' }, 'Visit TradingView'),
+              h('a', { href: 'https://tradingview.github.io/lightweight-charts/docs', target: '_blank', rel: 'noreferrer' }, 'Lightweight Charts documentation'),
+            ]),
+          ]),
         ]),
       ])
     }

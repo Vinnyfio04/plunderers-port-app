@@ -1,5 +1,25 @@
 # Design pipeline
 
+## Yahoo minute history and live merge
+
+`yahoo_history.fetch_recent -> Yahoo Ticker.history(5d, 1m, prepost=False, auto_adjust=False) -> yahoo_minute_bars -> recorded_history -> aggregate_timeframe -> FastAPI HTTP/WebSocket -> Vue`.
+
+FastAPI fetches on production startup in a worker thread and refreshes every 60 seconds during XNYS regular hours. An explicit CSV fixture, test feed, or disabled live feed skips external fetches. Failed history requests preserve cached bars and create an unavailable fetch record. The dashboard shows history failure and market-session state independently from WebSocket connectivity.
+
+`yahoo_minute_bars` stores `bar_id`, `ticker`, UTC minute `timestamp`, `fetched_at`, request-start `snapshot_at`, six-field `candle_json`, `completed`, and `payload_hash`. Latest bar ID available at the requested cutoff wins per symbol/minute. Unchanged completed bars do not create a new version; changed/reverted bars are retained. Provisional versions retain their own snapshot cutoff. `yahoo_history_fetches` stores `fetch_id`, ticker, fetch time, status, returned bar count, and a safe failure message. Tables initialize additively on backend startup. Raw `observations` and ordered `receipts` retain the original tick audit and power the existing tick-replay path.
+
+Completed fetched bars are authoritative replacements for matching observed minutes. A provisional fetched bar is extended only by quotes whose source times are later than its request-start snapshot; open stays from the bar, highs/lows expand and close follows the last source-ordered quote. Its volume becomes null until a later history fetch reconciles it. Never add Yahoo bar volume and quote-volume differences. New minutes without a bar use the existing observation aggregation. Larger timeframes aggregate the merged one-minute series once. HTTP as-of cutoffs apply both to bar fetch availability and observation receipt availability; a historical fetch today is not injected into yesterday's tick replay.
+
+On subscription, a history snapshot closes the HTTP-to-socket race and baselines existing completed candles for automation. Thereafter changed minutes and completion states use the existing candle-update message. Thirty-second status messages refresh exchange open/closed state and fetch errors even without quotes. Session open/close and next-open values use the installed exchange calendar, including early closes and UTC changes.
+
+## November 14 recorded-live update
+
+Live history now follows `SQLite observations + receipts -> recorded_history -> aggregate_ticker -> aggregate_timeframe -> /api/history -> Vue`. Receipt cutoffs exclude observations and corrections not yet received. `/ws/candles` uses the same history function and sends every changed candle, including older late minutes. A one-second hub task evaluates completion even when no new quote arrives; it runs while live clients are attached and is canceled at shutdown. The explicit `MARKET_CANDLE_FILE` override remains for labeled test fixtures only.
+
+The additive `candle_states` table has `state_id`, `ticker`, `interval`, `timestamp`, `evaluated_at`, `candle_json`, and `completion_json`. A unique constraint on symbol/interval/time and both JSON values avoids duplicate state rows after reconnect. It records emitted states, while original observations and receipts remain the authoritative replay inputs. Replay still reconstructs at original receipt times. A completion row is a retained evaluation, not a claim that late corrections cannot arrive.
+
+Volume requires a cumulative total in the minute and a same-date baseline in the preceding minute. Missing/gapped baselines and resets produce null. Quote `last_size` is not a complete trade tape and is not summed. Live messages missing totals therefore retain unknown volume rather than artificial bars. The browser distinguishes upstream status, socket status, recorded history, and TEST DATA; an empty history no longer blocks subscription. The original descriptions below predate this update where they refer to CSV startup or unpersisted completion.
+
 ## Planned data flow
 
 ```text
@@ -28,7 +48,7 @@ Backend API client ---> normalization / validation ---> market state
                                       user request back through FastAPI
 ```
 
-The user remains the decision-maker. The initial design does not include automatic order execution.
+The user remains the decision-maker. The app has reviewed **paper** automation but no live brokerage execution. Part 4.1 acceptance criteria and the current evidence gap are in [assignment_instructions.md](assignment_instructions.md).
 
 ## File and directory responsibilities
 
@@ -42,7 +62,7 @@ The user remains the decision-maker. The initial design does not include automat
 
 ## What exists today
 
-As of November 12, 2026, the first frontend-to-backend path and offline replay path exist:
+As of November 14, 2026, the frontend-to-backend path and offline replay path exist:
 
 - `backend/main.py` exposes `GET /api/health` through FastAPI.
 - `backend/main.py` reads the supplied one-minute CSV with Python's built-in `csv` module and exposes its ordered rows through `GET /api/history`.
@@ -56,7 +76,7 @@ As of November 12, 2026, the first frontend-to-backend path and offline replay p
 - `backend/replay_session.py` opens an existing observation database in SQLite read-only mode, selects a symbol and source-time range, and reconstructs candle state in original receipt order using an in-memory recorder plus the existing aggregation layers.
 - `backend/indicators.py` owns the extensible indicator registry, common validation/calculation contract, SMA and rolling-range implementations, and SQLite-backed named instances.
 - `backend/paper_trading.py` owns the reusable long-only execution function, pending-order logic, idempotent request IDs, paper market-event arrivals, atomic fills, cash, and positions.
-- `prompts/data/sample-candles.csv` is the base-resolution candle source; future larger timeframes, including daily candles, should aggregate from these one-minute rows.
+- `prompts/data/sample-candles.csv` is a synthetic practice source for `/api/history`. Larger sample timeframes are derived from those one-minute rows. Live-mode startup does not yet backfill from saved observations or Yahoo history.
 - Uvicorn serves the backend on `127.0.0.1:8000`.
 - Vite serves the Vue frontend on `127.0.0.1:5173`.
 - `frontend/vite.config.js` forwards `/api` requests to FastAPI.
@@ -66,7 +86,18 @@ As of November 12, 2026, the first frontend-to-backend path and offline replay p
 - The chart and page include the required TradingView attribution logo, notice, and link.
 - Backend and frontend dependency declarations and the frontend lockfile exist.
 
-The Yahoo subscription, SQLite recorder, both aggregation layers, FastAPI candle WebSocket, and Vue live-update adapter exist. A real after-hours Yahoo observation was received and stored, but it correctly did not create a regular-session candle. The end-to-end in-session live candle check is therefore still pending. A model provider, authentication, watchlist, and trading-helper workflow do not exist yet.
+The Yahoo subscription, SQLite recorder, both aggregation layers, FastAPI candle WebSocket, and Vue live-update adapter exist. A real after-hours Yahoo observation was received and stored, but it correctly did not create a regular-session candle. The end-to-end in-session live candle check is still pending. Vue also has a local watchlist of loadable symbols, decision analysis, and paper automation. OpenAI decision and voice integrations exist; the independent live-voice hardware check remains pending.
+
+## Market-observation SQLite schema
+
+`backend/market_store.py` creates two market-data tables in the default ignored database `backend/data/market-observations.sqlite3`:
+
+| Table | Main fields | Meaning |
+| --- | --- | --- |
+| `observations` | `observation_id` primary key; `ticker`; raw, normalized UTC, epoch-millisecond, and unit-tagged source time; `price`, `day_volume`, `last_size`; `raw_payload_json`, `payload_hash`; `relationship`, `supersedes_observation_id` | One canonical source payload per `(ticker, payload_hash)`. A changed same-time message remains separate unless a trusted caller explicitly links it as a revision. The superseded row is retained. |
+| `receipts` | `receipt_id` primary key; `observation_id` foreign key; `backend_receipt_time_utc`; `is_exact_repeat` | One row per arrival, including an exact repeat. `receipt_id` gives stable arrival order even when source times arrive late. |
+
+Indexes support ticker/source-time queries and receipt-order replay. `backend/replay_session.py` opens recorded observations read-only, orders receipts by `receipt_id`, and rebuilds effective candles in memory. `backend/candle_aggregation.py` computes minute completion from the evaluation time; timeframe status travels outside each six-field candle. The market-data schema does not persist candle-completion events separately. The default database was read on November 14 and held 39 AAPL observations with November 13 source times; none had `day_volume` or `last_size`, and none fell inside the November 13 regular-session window. These records do not yet prove a visible real live candle or corresponding live volume.
 
 ## Live candle message flow
 
@@ -281,8 +312,7 @@ Stop increments the persistent automation generation and rejects its pending ord
 
 ## Next design decisions
 
-1. Select a market-data API and clarify whether its feed is real-time, delayed, or simulated.
-2. Select the agent/model provider and define what data may be sent to it.
-3. Decide the initial instrument types and smallest user workflow.
-4. Decide whether watchlists or preferences must persist locally.
-5. Agree on package versions and obtain approval before adding manifests or installing project dependencies.
+1. Demonstrate an actual Yahoo regular-session observation through SQLite, backend aggregation, FastAPI WebSocket, and the Vue chart; record source age, completion, and unavailable-feed behavior.
+2. Resolve live volume and replace the CSV-only startup view with recorded or otherwise sourced market history, keeping synthetic samples explicitly labeled.
+3. Decide whether reconstructed candle-completion state satisfies Part 4.1 or whether completion transitions must be stored in SQLite.
+4. Decide whether watchlist preferences should persist locally. Obtain approval before any new dependency or manifest change.

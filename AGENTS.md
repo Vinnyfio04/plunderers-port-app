@@ -14,6 +14,7 @@
 - Record the prompt's observed results, including failed and passing checks, in `docs/verification.md`.
 - Keep credentials, API keys, tokens, and other secrets out of source code, prompts, logs, screenshots, and Git.
 - Use environment variables or an ignored local secrets file when credentials are eventually needed. Commit only a redacted example file.
+- Use `docs/assignment_instructions.md` as the Part 4.1 acceptance reference. Label CSV and constructed feed evidence separately from actual Yahoo observations. Do not call live streaming complete until one regular-session source message is matched to its SQLite record, backend candle, WebSocket update, and visible chart result.
 
 ## Tool and dependency procedure
 

@@ -329,7 +329,7 @@ class MarketRecorder:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def list_effective_observations(self, ticker: str) -> list[dict[str, Any]]:
+    def list_effective_observations(self, ticker: str, as_of: datetime | None = None) -> list[dict[str, Any]]:
         """Return one ticker's current observations in source-time order.
 
         An observation explicitly superseded by a correction remains stored for
@@ -343,15 +343,19 @@ class MarketRecorder:
             WHERE observations.ticker = ?
               AND observations.source_time_epoch_ms IS NOT NULL
               AND observations.price IS NOT NULL
+              AND EXISTS (SELECT 1 FROM receipts r WHERE r.observation_id = observations.observation_id
+                          AND (? IS NULL OR julianday(r.backend_receipt_time_utc) <= julianday(?)))
               AND NOT EXISTS (
                   SELECT 1
                   FROM observations AS corrections
                   WHERE corrections.supersedes_observation_id =
                         observations.observation_id
+                    AND EXISTS (SELECT 1 FROM receipts r WHERE r.observation_id = corrections.observation_id
+                                AND (? IS NULL OR julianday(r.backend_receipt_time_utc) <= julianday(?)))
               )
             ORDER BY observations.source_time_epoch_ms, observations.observation_id
             """,
-            (ticker.strip().upper(),),
+            (ticker.strip().upper(), *([normalize_receipt_time(as_of) if as_of else None] * 4)),
         ).fetchall()
         return [dict(row) for row in rows]
 

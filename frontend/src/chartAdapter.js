@@ -7,9 +7,9 @@ import {
   createChart,
 } from 'lightweight-charts'
 
-const UP_COLOR = '#2dd4bf'
-const DOWN_COLOR = '#fb7185'
-const INDICATOR_COLORS = ['#fbbf24', '#60a5fa', '#c084fc', '#f472b6', '#a3e635']
+const UP_COLOR = '#089981'
+const DOWN_COLOR = '#f23645'
+const INDICATOR_COLORS = ['#2962ff', '#9c27b0', '#e58900', '#00897b', '#e75480']
 
 export function toChartTime(timestamp) {
   const milliseconds = Date.parse(timestamp)
@@ -38,36 +38,36 @@ export function createCandleChart(container, candles, onInspect) {
     height: 500,
     layout: {
       attributionLogo: true,
-      background: { type: ColorType.Solid, color: '#111827' },
-      textColor: '#94a3b8',
+      background: { type: ColorType.Solid, color: '#ffffff' },
+      textColor: '#616a79',
       panes: {
-        separatorColor: '#263348',
-        separatorHoverColor: '#334155',
+        separatorColor: '#e3e7ec',
+        separatorHoverColor: '#cbd2da',
       },
     },
     grid: {
-      vertLines: { color: '#1e293b' },
-      horzLines: { color: '#1e293b' },
+      vertLines: { color: '#edf0f3' },
+      horzLines: { color: '#edf0f3' },
     },
     crosshair: {
       mode: CrosshairMode.Normal,
-      vertLine: { color: '#64748b', labelBackgroundColor: '#334155' },
-      horzLine: { color: '#64748b', labelBackgroundColor: '#334155' },
+      vertLine: { color: '#959da9', labelBackgroundColor: '#596579' },
+      horzLine: { color: '#959da9', labelBackgroundColor: '#596579' },
     },
     localization: {
       timeFormatter: formatChartTime,
     },
     rightPriceScale: {
-      borderColor: '#334155',
-      scaleMargins: { top: 0.08, bottom: 0.32 },
+      borderColor: '#e1e5ea',
+      scaleMargins: { top: 0.07, bottom: 0.31 },
     },
     timeScale: {
-      borderColor: '#334155',
+      borderColor: '#e1e5ea',
       timeVisible: true,
       secondsVisible: false,
       rightOffset: 1,
-      barSpacing: 72,
-      minBarSpacing: 18,
+      barSpacing: 36,
+      minBarSpacing: 5,
     },
   })
 

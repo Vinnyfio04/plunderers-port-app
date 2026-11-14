@@ -43,6 +43,8 @@ def minute_volume(
             observation["day_volume"]
             for observation in reversed(observations)
             if observation["source_time_epoch_ms"] < minute_start_ms
+            and observation["source_time_epoch_ms"] >= minute_start_ms - ONE_MINUTE_MS
+            and utc_timestamp(observation["source_time_epoch_ms"])[:10] == utc_timestamp(minute_start_ms)[:10]
             and observation["day_volume"] is not None
         ),
         None,
@@ -81,7 +83,7 @@ def aggregate_ticker(
     as_of: datetime,
 ) -> CandleAggregation:
     evaluation_time = normalize_as_of(as_of)
-    observations = recorder.list_effective_observations(ticker)
+    observations = recorder.list_effective_observations(ticker, evaluation_time)
     minute_starts = sorted(
         {
             observation["source_time_epoch_ms"] // ONE_MINUTE_MS * ONE_MINUTE_MS

@@ -25,6 +25,8 @@ from backend.indicators import (
     instance_with_values,
 )
 from backend.live_candles import CandleHub
+from backend.recorded_history import recorded_history
+from backend.yahoo_history import fetch_recent
 from backend.market_store import DEFAULT_DATABASE, MarketRecorder
 from backend.paper_trading import PaperAccount, dollars_to_cents, execute_paper_action
 from backend.replay_session import ReplayEngine, RecordedSessionReader, parse_utc
@@ -76,6 +78,24 @@ CANDLE_FILE = Path(
     )
 ).expanduser().resolve()
 HISTORY_SYMBOL = "AAPL"
+history_refresh_task = None
+
+
+@app.on_event('startup')
+async def start_history_refresh():
+    global history_refresh_task
+    # Fixtures and explicitly offline runs never contact Yahoo.
+    if (not LIVE_FEED_ENABLED or os.getenv('MARKET_CANDLE_FILE')
+            or os.getenv('MARKET_TEST_FEED', '0') == '1'):
+        return
+    await asyncio.to_thread(fetch_recent, DATABASE_PATH, HISTORY_SYMBOL)
+    async def refresh():
+        while True:
+            await asyncio.sleep(60)
+            from backend.yahoo_history import market_status
+            if market_status()['status'] == 'open':
+                await asyncio.to_thread(fetch_recent, DATABASE_PATH, HISTORY_SYMBOL)
+    history_refresh_task = asyncio.create_task(refresh())
 
 
 def load_candles() -> list[dict[str, Any]]:
@@ -83,6 +103,8 @@ def load_candles() -> list[dict[str, Any]]:
 
 
 def history_result(timeframe: Timeframe, as_of: datetime | None = None) -> dict[str, Any]:
+    if not os.getenv('MARKET_CANDLE_FILE'):
+        return recorded_history(DATABASE_PATH, HISTORY_SYMBOL, timeframe, as_of)
     return aggregate_timeframe(
         load_minute_records(CANDLE_FILE),
         timeframe=timeframe,
@@ -513,6 +535,7 @@ def history(
     result = history_result(timeframe, as_of)
     return {
         "symbol": normalized_symbol,
+        "live_feed_enabled": LIVE_FEED_ENABLED,
         **result,
     }
 
@@ -650,6 +673,12 @@ async def replay_stream(websocket: WebSocket) -> None:
 
 @app.on_event("shutdown")
 async def stop_candle_hub() -> None:
+    if history_refresh_task:
+        history_refresh_task.cancel()
+        try:
+            await history_refresh_task
+        except asyncio.CancelledError:
+            pass
     await candle_hub.close()
     indicator_store.close()
     decision_store.close()

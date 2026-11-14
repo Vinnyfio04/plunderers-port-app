@@ -2,7 +2,7 @@
 
 ## Project overview
 
-Live Market Workplace is a lightweight, TradingView-style local application for people who want to observe live markets and make more informed trading decisions. It is aimed especially at less-experienced traders. The planned application will display live data from an external market-data API and provide an agentic helper that explains market context and supports buy/sell decision-making. The helper is advisory; the user remains responsible for every trading decision.
+Live Market Workplace is a lightweight, TradingView-style local application for people who want to observe markets and make more informed trading decisions. It is aimed especially at less-experienced traders. Yahoo Finance supplies the planned live stream, while the local paper account and agentic helper support practice and explanation. The helper is advisory; the user remains responsible for every trading decision. [Part 4.1 assignment instructions and the current gap assessment](docs/assignment_instructions.md) distinguish the live deliverable from the synthetic CSV practice data.
 
 ## Goals
 
@@ -17,11 +17,11 @@ Live Market Workplace is a lightweight, TradingView-style local application for 
 - **Backend:** Python application logic.
 - **Transport:** FastAPI HTTP and, where live updates require it, WebSocket routes.
 - **Frontend:** Vue components for user input, charts, and presentation.
-- **External services:** A market-data API and an agent/model provider are still to be selected.
+- **External services:** Yahoo Finance through yfinance for market observations; OpenAI for optional decision and voice features.
 
 ## Current status
 
-The first live charting vertical slice and an offline recorded-session replay are complete. FastAPI exposes history, live candle, and replay WebSocket paths, while the Vue development server forwards both transports to Python. The dashboard defaults to one minute and can switch through daily candles. Yahoo observations are stored in SQLite, aggregated by the backend, and either applied live or replayed in their original receipt order without changing the source database.
+The Yahoo subscription, SQLite recorder, candle aggregation, FastAPI live/replay WebSockets, and Vue chart are implemented. A labeled test feed has exercised the path through stored records, backend candles, WebSocket, and browser, including an upstream disconnect. A real after-hours Yahoo message was saved, but an actual regular-session Yahoo observation has **not yet** been matched to a visible chart candle and database row. Live-mode startup now fetches five days of real Yahoo AAPL minute bars into SQLite and serves them with captured observations through `/api/history`. It refreshes during market hours, keeps saved bars on fetch failure, and shows a waiting state only when no usable data exists. CSV is available only through an explicit `MARKET_CANDLE_FILE` development fixture. Replay reconstructs saved observations in receipt order without changing the recorded source data. The Part 4.1 live-streaming evidence remains pending.
 
 ## Prerequisites found on this computer
 
@@ -81,7 +81,9 @@ The tested candle-history URL is `http://127.0.0.1:8000/api/history`.
 
 ### Candle history
 
-`GET /api/history` defaults to the local `AAPL` sample and the `1m` timeframe. Request another supported timeframe with the query string:
+`GET /api/history` defaults to Yahoo AAPL minute bars and captured observations in SQLite, at the `1m` timeframe. Request another supported timeframe with the query string:
+
+The endpoint now uses recorded observations and receipt-time cutoffs. Explicit CSV fixtures are practice data labeled TEST DATA. Yahoo history fills recent missing minutes; WebSocket observations update forming candles while the app runs. See [assignment_instructions.md](docs/assignment_instructions.md) before presenting Part 4.1 results.
 
 ```text
 GET /api/history?symbol=AAPL&timeframe=5m
@@ -490,3 +492,29 @@ live-market-workplace/
 ```
 
 See [docs/design-pipeline.md](docs/design-pipeline.md) for planned responsibilities and data flow.
+
+
+## Recorded live history verification
+
+Use the normal startup command with `MARKET_LIVE_FEED=1` and no `MARKET_CANDLE_FILE` override for recorded/live market data. `MARKET_LIVE_FEED=0` keeps recorded history and Replay available while disabling the subscription. No Yahoo login is required.
+
+Run `python -m backend.check_recorded_history` using the full Python executable above. It creates and removes a disposable TEST DATA database and checks empty history, receipt cutoffs, late/revised candles, timer completion, unknown volume, upstream disconnect, and persistence after reopen. Run `node scripts/smoke-test.mjs` for the full offline browser regression.
+
+The additive `candle_states` table retains emitted OHLCV/completion states, evaluation time, symbol, interval, and candle timestamp. Volume uses cumulative `day_volume` differences with a same-date baseline in the preceding minute. Missing totals, gaps, and resets yield Unknown. Quote `last_size` is preserved but is not summed as if it were a complete trade tape. Real volume remains dependent on the feed supplying usable totals.
+
+
+## Yahoo startup history and volume reconciliation
+
+Use the tested backend and Vue startup commands above. With `MARKET_LIVE_FEED=1`, no `MARKET_CANDLE_FILE` override, and no test feed, FastAPI fetches five days of unadjusted regular-session AAPL minute bars on startup. Every 60 seconds during an open session it refreshes them. Existing yfinance and SQLite suffice; no new dependencies or credentials are required. An unavailable download keeps cached history and shows an error notice. With live disabled, startup uses the saved bars without contacting Yahoo.
+
+The existing database now also holds `yahoo_minute_bars` and `yahoo_history_fetches`; backend startup initializes them additively. Completed downloaded bars replace the corresponding observed minute, including its volume. Provisional bars may be extended by newer quotes, with volume marked Unknown until reconciliation. Bar volume and tick-derived volume are never added. Versions retain their fetch times; raw quote observations remain separate. The existing recorded-session Replay selects quote observations; imported bars are available through history and its as-of cutoff rather than being fabricated as tick receipts.
+
+The dashboard displays Market open/closed and the next regular-session open independently of feed connectivity. On a closed market it displays the last available session, not synthetic current-time candles.
+
+Run the tested focused command from the root using the selected Python executable:
+
+```powershell
+& 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe' -m backend.check_yahoo_history
+```
+
+This uses a disposable database and labeled TEST DATA for provisional tick overlays, volume replacement, duplicate completed downloads, revisions/reverts, as-of availability, cache on failure, and open/closed/early-close status. The full regression remains `node scripts/smoke-test.mjs`. Actual fetched-history and browser comparisons are recorded separately in `docs/verification.md`; a real in-session streaming check is still pending.
