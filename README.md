@@ -21,7 +21,7 @@ Live Market Workplace is a lightweight, TradingView-style local application for 
 
 ## Current status
 
-The Yahoo subscription, SQLite recorder, candle aggregation, FastAPI live/replay WebSockets, and Vue chart are implemented. A labeled test feed has exercised the path through stored records, backend candles, WebSocket, and browser, including an upstream disconnect. A real after-hours Yahoo message was saved, but an actual regular-session Yahoo observation has **not yet** been matched to a visible chart candle and database row. Live-mode startup now fetches five days of real Yahoo AAPL minute bars into SQLite and serves them with captured observations through `/api/history`. It refreshes during market hours, keeps saved bars on fetch failure, and shows a waiting state only when no usable data exists. CSV is available only through an explicit `MARKET_CANDLE_FILE` development fixture. Replay reconstructs saved observations in receipt order without changing the recorded source data. The Part 4.1 live-streaming evidence remains pending.
+The backend owns the Yahoo collector, session scheduling and SQLite recorder independently of browser tabs. The default store is `backend/data/market.db`; startup migrates the old store safely and serves indexed current candles immediately. Empty stores fetch five days of real Yahoo AAPL minute bars; existing stores reconcile an overlapping recent range in the background. The chart reconnects after backend interruptions, shows dated UTC labels and market-closed/next-open status, and appends actual next-session candles without invented overnight bars. Replay reconstructs saved observations in receipt order. CSV is available only through an explicit labeled `MARKET_CANDLE_FILE` development fixture. The expanded offline browser regression passes, including session reopening, chart capture, indicators and paper accounting. An actual regular-session Yahoo observation has **not yet** been matched through SQLite, WebSocket and the visible chart, so Part 4.1 live-streaming evidence remains pending.
 
 ## Prerequisites found on this computer
 
@@ -266,7 +266,7 @@ Start FastAPI from the project root with the live feed disabled:
 
 ```powershell
 $env:MARKET_LIVE_FEED = '0'
-$env:MARKET_DATABASE = (Resolve-Path 'backend/data/market-observations.sqlite3').Path
+$env:MARKET_DATABASE = (Resolve-Path 'backend/data/market.db').Path
 & 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe' -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
@@ -300,19 +300,19 @@ For deterministic local interface verification only, set `MARKET_TEST_FEED=1` be
 The default local database path is:
 
 ```text
-backend/data/market-observations.sqlite3
+backend/data/market.db
 ```
 
 Initialize it from the project root with:
 
 ```powershell
-& 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe' -m backend.market_store --database backend/data/market-observations.sqlite3 --init
+& 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe' -m backend.market_store --database backend/data/market.db --init
 ```
 
 The Yahoo receiver uses that path by default. An alternate path can be supplied with `--database`:
 
 ```powershell
-& 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe' -m backend.yahoo_stream --ticker AAPL --timeout 20 --database backend/data/market-observations.sqlite3
+& 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe' -m backend.yahoo_stream --ticker AAPL --timeout 20 --database backend/data/market.db
 ```
 
 The recorder stores source fields as canonical JSON plus indexed ticker, source-time, price, and volume values. A SHA-256 hash of the canonical source JSON recognizes an exact repeat regardless of dictionary key order. Exact repeats share one `observations` row but receive separate, ordered `receipts` rows.
@@ -324,7 +324,7 @@ A changed payload at the same ticker and source time is retained as another obse
 Generate one ticker's candles from the stored observations with:
 
 ```powershell
-& 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe' -m backend.candle_aggregation --database backend/data/market-observations.sqlite3 --ticker AAPL --as-of 2026-11-09T15:01:00Z
+& 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe' -m backend.candle_aggregation --database backend/data/market.db --ticker AAPL --as-of 2026-11-09T15:01:00Z
 ```
 
 Each object in `candles` has exactly `timestamp`, `open`, `high`, `low`, `close`, and `volume`. The separate `minute_status` array reports whether each UTC minute has ended as of the requested time.
@@ -505,7 +505,7 @@ The additive `candle_states` table retains emitted OHLCV/completion states, eval
 
 ## Yahoo startup history and volume reconciliation
 
-Use the tested backend and Vue startup commands above. With `MARKET_LIVE_FEED=1`, no `MARKET_CANDLE_FILE` override, and no test feed, FastAPI fetches five days of unadjusted regular-session AAPL minute bars on startup. Every 60 seconds during an open session it refreshes them. Existing yfinance and SQLite suffice; no new dependencies or credentials are required. An unavailable download keeps cached history and shows an error notice. With live disabled, startup uses the saved bars without contacting Yahoo.
+Use the tested backend and Vue startup commands above. With `MARKET_LIVE_FEED=1`, no `MARKET_CANDLE_FILE` override, and no test feed, FastAPI fetches five days of unadjusted regular-session AAPL minute bars for an empty store. Existing stores fetch from five minutes before the latest saved minute, bounded by Yahoo's recent-history window. Reconciliation runs every 60 seconds during an open session, with bounded final attempts after close and calendar-based waiting until the next open. Existing yfinance and SQLite suffice; no new dependencies or credentials are required. An unavailable download keeps cached history and shows an error notice. With live disabled, startup uses the saved bars without contacting Yahoo.
 
 The existing database now also holds `yahoo_minute_bars` and `yahoo_history_fetches`; backend startup initializes them additively. Completed downloaded bars replace the corresponding observed minute, including its volume. Provisional bars may be extended by newer quotes, with volume marked Unknown until reconciliation. Bar volume and tick-derived volume are never added. Versions retain their fetch times; raw quote observations remain separate. The existing recorded-session Replay selects quote observations; imported bars are available through history and its as-of cutoff rather than being fabricated as tick receipts.
 
@@ -518,3 +518,26 @@ Run the tested focused command from the root using the selected Python executabl
 ```
 
 This uses a disposable database and labeled TEST DATA for provisional tick overlays, volume replacement, duplicate completed downloads, revisions/reverts, as-of availability, cache on failure, and open/closed/early-close status. The full regression remains `node scripts/smoke-test.mjs`. Actual fetched-history and browser comparisons are recorded separately in `docs/verification.md`; a real in-session streaming check is still pending.
+
+
+## Continuous chart and market.db
+
+Clicking AAPL in Live / History loads its recent saved sessions even when the market is closed. Company selection requests `/api/history?symbol=AAPL&timeframe=1m&recent=true`: saved candles appear immediately, and a missing cache gets a bounded Yahoo history attempt. Concurrent requests share a download and repeated clicks are throttled. Unavailable Yahoo history preserves cached candles; the UI retries backend failures without requiring a new live tick. Indicators and account panels load independently of the chart. Only AAPL currently has a selectable live/history integration; saved-session buttons remain Replay controls.
+
+Vite's API proxy uses a built-in Node HTTP keep-alive agent. On this installed local FastAPI stack, an upstream `Connection: close` request could reset before the response body was delivered, leaving a blank chart despite saved history. Keep the API proxy agent when changing development configuration; the browser regression checks all 1,950 fixture candles through the frontend URL. No additional package is needed.
+
+The normal database is now `backend/data/market.db`. On first startup, an existing `backend/data/market-observations.sqlite3` is copied with SQLite's backup API, all project tables and IDs are preserved, and versioned migrations create the indexed current-candle tables. The old file remains a recovery copy. An existing recognized `market.db` is upgraded idempotently; unrelated databases are rejected. Databases, WAL/SHM files and owner-lock files are ignored by Git.
+
+For explicit initialization/migration with the backend stopped, use the tested command from the project root:
+
+```powershell
+& 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe' -m backend.database
+```
+
+Use the existing Uvicorn and Vue startup commands above, with one Uvicorn worker. The backend owns the AAPL collector even with no browser open. It schedules regular sessions with the exchange calendar, retries disconnects with backoff, performs incremental overlapping history reconciliation, and makes bounded final fetches after close. The local socket reconnects automatically after a backend restart. On a closed market the last real candles stay visible and the next open is shown; no overnight candles are invented. At open the next actual minute appends after the previous session. Source timestamps stay UTC and axis/crosshair labels use `MM/DD/YYYY HH:mm` with a visible UTC label.
+
+`GET /api/history` returns at most 2,000 candles by default, with `limit` (1..2000), timezone-qualified `before` and `start` bounds, a `next_before` cursor and a committed revision watermark. Scroll left to load older pages; the browser retains at most 6,000 candles and evicts later pages while reviewing older history. **Latest · UTC** returns to the current window. Indicator/snapshot warm-up uses a bounded backend context derived from each indicator's validated window, independent of browser scrolling.
+
+Current candles use typed `candles_1m` columns with a composite instrument/time primary key. Only affected minutes and baseline-dependent neighbors are recomputed. Revisions/provenance and original receipts remain queryable; larger intervals derive from effective minute rows. `MARKET_DATABASE` continues to select a separate test database. The existing quote-replay workflow remains receipt-ordered and read-only for the recorded source.
+
+The expanded single-command regression is still `node scripts/smoke-test.mjs`. It now includes migration/ownership/recovery, a million on-disk minute candles with quote/revision audit data, Friday/Monday adjacency, desktop/mobile dated canvas labels, backend restart/socket reconnect, and commit-to-screen latency. Run the focused backend checks with `python -m backend.check_continuous` and `python -m backend.check_yahoo_history` using the selected Python executable. All deterministic events and provider replies in those checks are labeled TEST DATA; actual Yahoo history and open-session evidence are recorded separately in `docs/verification.md`.

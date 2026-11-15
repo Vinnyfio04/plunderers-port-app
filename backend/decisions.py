@@ -271,6 +271,7 @@ class DecisionStore:
         timeframe: str,
         cutoff: str,
         candles: Any,
+        context: dict | None = None,
     ) -> dict[str, Any]:
         normalized_symbol = str(symbol).strip().upper()
         if not normalized_symbol:
@@ -278,12 +279,18 @@ class DecisionStore:
         if timeframe not in SUPPORTED_TIMEFRAMES:
             raise ValueError("Snapshot timeframe is unsupported.")
         normalized_candles = _validate_candles(candles, cutoff)
+        if context is not None:
+            matching = {c['timestamp']: c for c in context['candles']}
+            if any(matching.get(c['timestamp']) != c for c in normalized_candles):
+                raise ValueError('Chart candles changed or are unavailable in stored history; reload and recapture the chart.')
         status = [
             {"timestamp": candle["timestamp"], "interval_ended": True}
             for candle in normalized_candles
         ]
+        calculation_candles = [c for c in context['candles'] if c['timestamp']<=cutoff] if context else normalized_candles
+        calculation_status = context['status'] if context else status
         indicators = [
-            instance_with_values(instance, normalized_candles, status)
+            instance_with_values(instance, calculation_candles, calculation_status)
             for instance in self.indicator_store.list(normalized_symbol, timeframe)
         ]
         paper = self.paper_account.snapshot(normalized_symbol)
@@ -309,6 +316,9 @@ class DecisionStore:
             },
         }
         snapshot["python_crossover"] = calculate_crossover(indicators, cutoff)
+        visible = {c['timestamp'] for c in normalized_candles}
+        for item in indicators:
+            item['values'] = [point for point in item['values'] if point['timestamp'] in visible]
         created_at = utc_now()
         with self._lock, self.connection:
             self.connection.execute(
@@ -568,7 +578,7 @@ def call_decision_provider(
     except HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")[:500]
         raise ValueError(f"Decision provider returned HTTP {error.code}: {detail}") from error
-    except (URLError, TimeoutError, json.JSONDecodeError) as error:
+    except (URLError, OSError, json.JSONDecodeError) as error:
         raise ValueError(f"Decision provider request failed: {error}") from error
 
 

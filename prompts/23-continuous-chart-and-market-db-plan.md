@@ -1,0 +1,3 @@
+# Continuous chart and scalable market database plan
+
+Create a plan to have this chart update continuously to mark the current state of the market. The times at the bottom should include mm/dd/yyyy next to the times in order to distinguish which days stocks we are looking at. There should be a label that tells the user the market is closed, but when it opens it should pick right back up where it left off next to the previous candle. The data should be stored in a SQLite Database in backend/data/market.db, if it does not exist then create it. It should hold data in the most efficient way that benefits candle creation. Plan for the DB to hold a lot of data. Once the plan is created, verify the plan matches requirements and is the most efficient way of executing this plan.

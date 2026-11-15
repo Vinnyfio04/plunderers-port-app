@@ -26,7 +26,9 @@ from backend.indicators import (
 )
 from backend.live_candles import CandleHub
 from backend.recorded_history import recorded_history
-from backend.yahoo_history import fetch_recent
+from backend.yahoo_history import fetch_recent, persist_download, market_status
+from backend.database import database_path, prepare_database, DatabaseOwner
+from backend.write_coordinator import WriteCoordinator
 from backend.market_store import DEFAULT_DATABASE, MarketRecorder
 from backend.paper_trading import PaperAccount, dollars_to_cents, execute_paper_action
 from backend.replay_session import ReplayEngine, RecordedSessionReader, parse_utc
@@ -39,9 +41,10 @@ from backend.timeframe_history import (
 from backend.voice import create_live_session, decision_summary, list_decision_summaries
 
 
-DATABASE_PATH = Path(
-    os.getenv("MARKET_DATABASE", str(DEFAULT_DATABASE))
-).expanduser().resolve()
+DATABASE_PATH = database_path()
+DATABASE_PATH.parent.mkdir(parents=True,exist_ok=True)
+database_owner = DatabaseOwner(DATABASE_PATH)
+prepare_database(DATABASE_PATH)
 with MarketRecorder(DATABASE_PATH):
     pass
 paper_account = PaperAccount(
@@ -50,6 +53,15 @@ paper_account = PaperAccount(
 )
 
 app = FastAPI(title="Live Market Workplace API")
+writer = WriteCoordinator()
+writer_loop = None
+
+
+@app.middleware('http')
+async def serialize_mutations(request, call_next):
+    if request.method in ('POST','PUT','PATCH','DELETE') and request.url.path not in ('/api/decisions','/api/voice-sessions'):
+        return await writer.run(lambda:call_next(request))
+    return await call_next(request)
 candle_hub = CandleHub(database_path=DATABASE_PATH, paper_account=paper_account)
 replay_reader = RecordedSessionReader(candle_hub.database_path)
 replay_engine = ReplayEngine(candle_hub.database_path)
@@ -79,22 +91,55 @@ CANDLE_FILE = Path(
 ).expanduser().resolve()
 HISTORY_SYMBOL = "AAPL"
 history_refresh_task = None
+recent_history_tasks = {}
+recent_history_attempts = {}
+
+
+async def reconcile_recent_history(symbol=HISTORY_SYMBOL):
+    """Share startup/selection downloads; network waits never occupy the SQLite writer."""
+    with MarketRecorder(DATABASE_PATH) as store:
+        latest = store.connection.execute('''SELECT MAX(minute_start) FROM candles_1m
+            WHERE instrument_id=(SELECT instrument_id FROM instruments WHERE symbol=?)''',(symbol,)).fetchone()[0]
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    beginning = max(datetime.fromtimestamp(latest,timezone.utc)-timedelta(minutes=5),now-timedelta(days=7)) if latest else None
+    result = await asyncio.to_thread(fetch_recent,DATABASE_PATH,symbol,beginning,True)
+    if latest and now-datetime.fromtimestamp(latest,timezone.utc)>timedelta(days=7):
+        result['message'] = 'Some older minutes may be outside Yahoo minute-history retention; gaps are preserved.'
+    await writer.run(lambda:persist_download(DATABASE_PATH,symbol,result))
+
+
+def request_recent_history(symbol=HISTORY_SYMBOL):
+    task = recent_history_tasks.get(symbol)
+    if task is None or task.done():
+        task = asyncio.create_task(reconcile_recent_history(symbol))
+        recent_history_tasks[symbol] = task
+        recent_history_attempts[symbol] = asyncio.get_running_loop().time()
+    return task
 
 
 @app.on_event('startup')
 async def start_history_refresh():
-    global history_refresh_task
+    global history_refresh_task, writer_loop
+    writer_loop = asyncio.get_running_loop()
     # Fixtures and explicitly offline runs never contact Yahoo.
     if (not LIVE_FEED_ENABLED or os.getenv('MARKET_CANDLE_FILE')
             or os.getenv('MARKET_TEST_FEED', '0') == '1'):
         return
-    await asyncio.to_thread(fetch_recent, DATABASE_PATH, HISTORY_SYMBOL)
+    await candle_hub.start(writer)
     async def refresh():
+        previous = None
+        close_attempts = 0
         while True:
-            await asyncio.sleep(60)
-            from backend.yahoo_history import market_status
-            if market_status()['status'] == 'open':
-                await asyncio.to_thread(fetch_recent, DATABASE_PATH, HISTORY_SYMBOL)
+            state = market_status()
+            if previous is None or state['status']=='open' or previous=='open' or close_attempts:
+                await request_recent_history()
+                if previous=='open' and state['status']=='closed':
+                    close_attempts = 3
+                elif close_attempts:
+                    close_attempts -= 1
+            previous = state['status']
+            await asyncio.sleep(60 if state['status']=='open' or close_attempts else min(30,max(1,(datetime.fromisoformat(state['next_open'].replace('Z','+00:00'))-datetime.now(timezone.utc)).total_seconds())))
     history_refresh_task = asyncio.create_task(refresh())
 
 
@@ -102,9 +147,21 @@ def load_candles() -> list[dict[str, Any]]:
     return [record.candle for record in load_minute_records(CANDLE_FILE)]
 
 
-def history_result(timeframe: Timeframe, as_of: datetime | None = None) -> dict[str, Any]:
+def history_result(timeframe: Timeframe, as_of: datetime | None = None, limit=2000, before=None, start=None) -> dict[str, Any]:
     if not os.getenv('MARKET_CANDLE_FILE'):
-        return recorded_history(DATABASE_PATH, HISTORY_SYMBOL, timeframe, as_of)
+        if candle_hub.manual_test and as_of is None:
+            as_of = candle_hub._now()
+        result = recorded_history(DATABASE_PATH, HISTORY_SYMBOL, timeframe, as_of,min(limit,2000),before,start)
+        # Indicator/snapshot warm-up is bounded by validated settings, independent of browser paging.
+        while len(result['candles'])<limit and result['next_before']:
+            cursor = result['next_before']
+            older = recorded_history(DATABASE_PATH,HISTORY_SYMBOL,timeframe,as_of,min(limit-len(result['candles']),2000),cursor,start)
+            result['candles'] = older['candles']+result['candles']
+            result['status'] = older['status']+result['status']
+            result['next_before'] = older['next_before']
+            if not older['candles'] or older['next_before']==cursor:
+                break
+        return result
     return aggregate_timeframe(
         load_minute_records(CANDLE_FILE),
         timeframe=timeframe,
@@ -112,12 +169,18 @@ def history_result(timeframe: Timeframe, as_of: datetime | None = None) -> dict[
     )
 
 
-def indicator_instances(symbol: str, timeframe: Timeframe) -> list[dict[str, Any]]:
-    result = history_result(timeframe)
-    return [
+def indicator_instances(symbol: str, timeframe: Timeframe, before=None) -> list[dict[str, Any]]:
+    configurations = indicator_store.list(symbol,timeframe)
+    window = max((item.settings['window'] for item in configurations),default=1)
+    result = history_result(timeframe,limit=min(12000,2000+window),before=before)
+    visible_times = {c['timestamp'] for c in result['candles'][-2000:]}
+    instances = [
         instance_with_values(instance, result["candles"], result["status"])
-        for instance in indicator_store.list(symbol, timeframe)
+        for instance in configurations
     ]
+    for item in instances:
+        item['values'] = [point for point in item['values'] if point['timestamp'] in visible_times]
+    return instances
 
 
 def paper_snapshot(symbol: str) -> dict[str, Any]:
@@ -132,16 +195,34 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "backend"}
 
 
+@app.post('/api/market-fixture')
+async def market_fixture(payload: dict[str, Any] = Body(...)):
+    if not (PAPER_FIXTURE_ENABLED and candle_hub.manual_test and DATABASE_PATH!=DEFAULT_DATABASE):
+        raise HTTPException(status_code=404,detail='Market fixture input disabled')
+    receipt = parse_utc(payload['receipt_time'])
+    source = parse_utc(payload['source_time'])
+    message = dict(id='AAPL',time=int(source.timestamp()*1000),price=payload['price'],
+        day_volume=payload.get('volume'),test_data=True,test_data_label='TEST DATA — continuous browser fixture')
+    await candle_hub.publish_observation('AAPL',message,receipt,message['test_data_label'],broadcast=False)
+    import time
+    return {'committed_at_ms':round(time.time()*1000),'price':payload['price']}
+
+
 @app.post("/api/decision-snapshots", status_code=201)
 def create_decision_snapshot(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     try:
+        tf = str(payload.get('timeframe','1m'))
+        from datetime import timedelta
+        bound = (parse_utc(str(payload.get('cutoff','')))+timedelta(minutes={'1m':1,'5m':5,'15m':15,'1h':60,'1d':1440}[tf])).isoformat()
+        context = history_result(tf,limit=12000,before=bound)
         return decision_store.create_snapshot(
             symbol=str(payload.get("symbol", "")),
             timeframe=str(payload.get("timeframe", "")),
             cutoff=str(payload.get("cutoff", "")),
             candles=payload.get("candles"),
+            context=context,
         )
-    except ValueError as error:
+    except (ValueError,KeyError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
@@ -207,7 +288,9 @@ def create_decision(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
         if not orders_unchanged:
             reasons.append("Paper orders changed while analysis was running.")
         eligible = not reasons
-        return decision_store.save_decision(
+        # Provider calls ran outside the write queue. Persist only the result in FIFO order.
+        def save():
+            return decision_store.save_decision(
             snapshot=snapshot,
             image=image,
             provider=provider,
@@ -222,7 +305,8 @@ def create_decision(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
             final_check=final_check,
             analyst_error=analyst_error,
             reviewer_error=reviewer_error,
-        )
+            )
+        return asyncio.run_coroutine_threadsafe(writer.run(save),writer_loop).result()
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -422,7 +506,7 @@ def replay_selections() -> dict[str, Any]:
     return {
         "mode": "Replay",
         "read_only": True,
-        "live_feed_enabled": LIVE_FEED_ENABLED,
+        "live_feed_enabled": LIVE_FEED_ENABLED or candle_hub.manual_test,
         "selections": replay_reader.selections(),
     }
 
@@ -436,14 +520,17 @@ def available_indicator_types() -> dict[str, Any]:
 def list_indicators(
     symbol: str = Query(HISTORY_SYMBOL, min_length=1),
     timeframe: Timeframe = "1m",
+    before: datetime | None = None,
 ) -> dict[str, Any]:
     normalized_symbol = symbol.strip().upper()
+    if before is not None and before.tzinfo is None:
+        raise HTTPException(status_code=422,detail='before must include a timezone')
     if normalized_symbol != HISTORY_SYMBOL:
         raise HTTPException(status_code=404, detail="Unknown chart symbol")
     return {
         "symbol": normalized_symbol,
         "timeframe": timeframe,
-        "instances": indicator_instances(normalized_symbol, timeframe),
+        "instances": indicator_instances(normalized_symbol, timeframe,before.isoformat() if before else None),
     }
 
 
@@ -513,10 +600,14 @@ def evaluate_indicators(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
 
 
 @app.get("/api/history")
-def history(
+async def history(
     symbol: str = Query(HISTORY_SYMBOL, min_length=1),
     timeframe: Timeframe = "1m",
     as_of: datetime | None = None,
+    limit: int = Query(2000,ge=1,le=2000),
+    before: datetime | None = None,
+    start: datetime | None = None,
+    recent: bool = False,
 ) -> dict[str, Any]:
     normalized_symbol = symbol.strip().upper()
     if normalized_symbol != HISTORY_SYMBOL:
@@ -532,10 +623,27 @@ def history(
             detail="as_of must include a timezone, preferably UTC",
         )
 
-    result = history_result(timeframe, as_of)
+    for bound in (before,start):
+        if bound is not None and bound.tzinfo is None:
+            raise HTTPException(status_code=422,detail='History bounds must include a timezone')
+    result = history_result(timeframe, as_of,limit,before.isoformat() if before else None,start.isoformat() if start else None)
+    # Opening a company must not depend on an open exchange or a new WebSocket tick.
+    if (recent and as_of is None and before is None and start is None and LIVE_FEED_ENABLED
+            and not os.getenv('MARKET_CANDLE_FILE') and not candle_hub.test_feed and not candle_hub.manual_test):
+        elapsed = asyncio.get_running_loop().time()-recent_history_attempts.get(normalized_symbol,float('-inf'))
+        if elapsed >= 60 or (recent_history_tasks.get(normalized_symbol) and not recent_history_tasks[normalized_symbol].done()):
+            task = request_recent_history(normalized_symbol)
+            if not result['candles']:
+                try:
+                    await asyncio.wait_for(asyncio.shield(task),timeout=12)
+                except asyncio.TimeoutError:
+                    pass
+                result = history_result(timeframe,None,limit)
+        if not result['candles']:
+            result['message'] = 'Recent Yahoo history is unavailable or still loading. Retry to load the last trading session.'
     return {
         "symbol": normalized_symbol,
-        "live_feed_enabled": LIVE_FEED_ENABLED,
+        "live_feed_enabled": LIVE_FEED_ENABLED or candle_hub.manual_test,
         **result,
     }
 
@@ -544,7 +652,7 @@ def history(
 async def candle_stream(websocket: WebSocket) -> None:
     symbol = websocket.query_params.get("symbol", HISTORY_SYMBOL).strip().upper()
     timeframe = websocket.query_params.get("timeframe", "1m")
-    if not LIVE_FEED_ENABLED:
+    if not LIVE_FEED_ENABLED and not candle_hub.manual_test:
         await websocket.close(code=1013, reason="Live feed is disabled")
         return
     if symbol != HISTORY_SYMBOL or timeframe not in SUPPORTED_TIMEFRAMES:
@@ -616,18 +724,18 @@ async def replay_stream(websocket: WebSocket) -> None:
                 await asyncio.sleep(min(delay / speed, 1.0))
             event_price = event.get("market_price")
             if event_price is not None:
-                paper_account.process_market_observation(
+                await writer.run(lambda:paper_account.process_market_observation(
                     symbol=symbol,
                     price=event_price,
                     observation_id=event["observation_id"],
                     receipt_id=event["receipt_id"],
                     arrival_time=receipt_time,
                     source="Recorded SQLite replay",
-                )
+                ))
             for update in event["updates"]:
                 if update["completion"]["interval_ended"]:
                     completed = update["candle"]
-                    paper_account.record_completed_candle_valuation(
+                    await writer.run(lambda:paper_account.record_completed_candle_valuation(
                         event_key=(
                             f"completed-candle:{symbol}:{timeframe}:"
                             f"{completed['timestamp']}:close-cents:"
@@ -639,7 +747,7 @@ async def replay_stream(websocket: WebSocket) -> None:
                         source=f"Recorded SQLite replay · completed {timeframe} candle",
                         observation_id=event["observation_id"],
                         receipt_id=event["receipt_id"],
-                    )
+                    ))
             await websocket.send_json(event)
             previous_receipt = receipt_time
 
@@ -679,7 +787,10 @@ async def stop_candle_hub() -> None:
             await history_refresh_task
         except asyncio.CancelledError:
             pass
+    await asyncio.gather(*recent_history_tasks.values(),return_exceptions=True)
     await candle_hub.close()
+    await writer.close()
     indicator_store.close()
     decision_store.close()
     paper_account.close()
+    database_owner.close()

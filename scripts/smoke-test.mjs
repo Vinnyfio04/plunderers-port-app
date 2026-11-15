@@ -134,15 +134,21 @@ function startProvider() {
     '14:36': ['close', 'downward', 'accept'],
   }
   const server = createServer(async (request, response) => {
+    const reply = (status, body, type='application/json') => {
+      response.writeHead(status, {'Content-Type':type,'Content-Length':Buffer.byteLength(body),Connection:'keep-alive'}).end(body)
+    }
+    state.stage = 'received headers'
     if (request.method !== 'POST' || request.url !== '/v1/decisions') {
-      response.writeHead(404).end(); return
+      reply(404,''); return
     }
     try {
       const chunks = []
       for await (const chunk of request) chunks.push(chunk)
+      state.stage = `received ${Buffer.concat(chunks).length} bytes`
       const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'))
       const parts = Object.fromEntries(payload.input[0].content.map((part) => [part.type, part]))
       const pixels = decodePixels(parts.input_image.image_url)
+      state.stage = 'decoded PNG'
       const data = parts.input_json.data
       const snapshot = data.snapshot ?? data
       assert.equal(snapshot.symbol, 'AAPL')
@@ -160,7 +166,7 @@ function startProvider() {
         snapshot_id: snapshot.snapshot_id, pixels })
       if (!reviewer && state.failNextAnalyst) {
         state.failNextAnalyst = false
-        response.writeHead(503, { 'Content-Type': 'text/plain' }).end('Offline provider failure fixture')
+        reply(503,'Offline provider failure fixture','text/plain')
         return
       }
       const answers = reviewer
@@ -168,13 +174,19 @@ function startProvider() {
         : [{ type: 'choice', name: 'action', choice: expected[0] },
            { type: 'choice', name: 'crossover', choice: expected[1] },
            { type: 'choice', name: 'evidence', choice: 'sufficient' }]
-      response.writeHead(200, { 'Content-Type': 'application/json' })
-        .end(JSON.stringify({ model: 'smoke-model', answers }))
+      reply(200,JSON.stringify({ model: 'smoke-model', answers }))
+      state.stage = 'returned answers'
     } catch (error) {
       state.error = error.message
-      response.writeHead(500).end('Smoke provider assertion failed')
+      reply(500,'Smoke provider assertion failed','text/plain')
     }
   })
+  server.on('clientError',(error,socket)=> {
+    if (error.code==='ECONNRESET') state.clientResets=(state.clientResets ?? 0)+1
+    else state.error=`HTTP parser: ${error.code}`
+    socket.destroy()
+  })
+  server.smokeState = state
   return { server, requests, state }
 }
 
@@ -248,6 +260,10 @@ async function waitText(selector, expected, timeout = 15000) {
   }, `${selector} contains ${expected}`, timeout)
 }
 
+async function waitExactText(selector,expected,timeout=15000) {
+  return waitFor(async()=>(await value(selector))===expected,`${selector} equals ${expected}`,timeout)
+}
+
 async function state() {
   return JSON.parse(await runPython(['-m', 'backend.smoke_state', '--database', database]))
 }
@@ -303,6 +319,9 @@ async function cleanup() {
 }
 
 async function main() {
+  log(await runPython(['-m', 'backend.check_continuous']))
+  log(await runPython(['-m', 'backend.check_recent_history']))
+  log(await runPython(['-m', 'backend.check_provider_failures']))
   assert.ok(existsSync(path.join(root, 'frontend', 'node_modules', 'vite', 'bin', 'vite.js')),
     'Vite is installed from the existing frontend lockfile')
   await fs.mkdir(runDir, { recursive: true })
@@ -354,9 +373,16 @@ async function main() {
   await pageCdp.send('Runtime.enable')
   await waitText('[data-testid="paper-cash"]', '$1000.00', 30000)
   log('Real Chrome opened the Vue dashboard with a fresh $1,000 account')
+  if (process.argv.includes('--history-only')) {
+    await continuousSessionChecks()
+    log('PASS focused company-history browser checks; decision/paper regression not run in this mode')
+    return
+  }
 
   await fill('[aria-label="Select dashboard mode"]', 'replay')
   await waitFor(async () => value('[aria-label="Select saved symbol"]'), 'recorded-session selector')
+  await waitFor(async()=>evaluate(`Boolean(document.querySelector('[aria-label="Replay start UTC"]')?.value && document.querySelector('[aria-label="Replay end UTC"]')?.value)`),'loaded recorded-session range')
+  await waitFor(async()=>evaluate(`[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Start Replay' && !b.disabled)`),'ready Replay control')
   await clickButton('Start Replay')
   await waitText('[data-testid="replay-progress"]', 'Complete', 30000)
   await fill('[aria-label="Inspect candle by UTC timestamp"]', '2026-11-09T14:32:00Z')
@@ -373,6 +399,7 @@ async function main() {
 
   await fill('[aria-label="Select dashboard mode"]', 'live')
   await waitText('[data-testid="paper-cash"]', '$1000.00')
+  await waitFor(async()=>evaluate(`[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Add indicator' && !b.disabled)`),'ready live indicator panel')
   await fill('[aria-label="Indicator name"]', 'Fast SMA')
   await fill('[aria-label="Indicator window"]', '1')
   await clickButton('Add indicator')
@@ -469,7 +496,122 @@ async function main() {
   assert.deepEqual(final.automation.map((item) => [item.candle_utc.slice(11, 16), item.status]),
     [['14:33', 'filled'], ['14:34', 'filled'], ['14:35', 'skipped'], ['14:36', 'filled']])
   log('Duplicate and post-Stop candles made no extra order or fill')
+  await continuousSessionChecks()
   log(`PASS browser=Chrome backend=FastAPI UI=Vue SQLite=isolated provider=stubbed calls=${providerHarness.requests.length}`)
+}
+
+async function continuousSessionChecks() {
+  const continuousDb = path.join(runDir, 'market.db')
+  await runPython(['-m','backend.continuous_fixture','--database',continuousDb])
+  const apiPort = await freePort()
+  const uiPort = await freePort()
+  const apiUrl = `http://127.0.0.1:${apiPort}`
+  const env = { MARKET_DATABASE:continuousDb, MARKET_LIVE_FEED:'0', MARKET_CANDLE_FILE:'',
+    MARKET_TEST_FEED:'0', MARKET_MANUAL_TEST_FEED:'1', MARKET_PAPER_FIXTURE:'1', PAPER_STARTING_CASH:'1000',
+    OPENAI_API_KEY:'', PYTHONDONTWRITEBYTECODE:'1' }
+  const launch = () => start(findPython(),['-m','uvicorn','backend.main:app','--host','127.0.0.1','--port',String(apiPort)],env,'Continuous FastAPI')
+  let backend = launch()
+  start(process.execPath,[path.join(root,'frontend','node_modules','vite','bin','vite.js'),'--host','127.0.0.1','--port',String(uiPort),'--strictPort'],
+    {VITE_BACKEND_URL:apiUrl},'Continuous Vue',path.join(root,'frontend'))
+  await ready(`${apiUrl}/api/health`,'Continuous FastAPI')
+  await ready(`http://127.0.0.1:${uiPort}/`,'Continuous Vue')
+  await pageCdp.send('Page.addScriptToEvaluateOnNewDocument',{source:`
+    window.__axisLabels = [];
+    const original = CanvasRenderingContext2D.prototype.fillText;
+    CanvasRenderingContext2D.prototype.fillText = function(text,...args) {
+      if (/\\d{2}\\/\\d{2}\\/\\d{4} \\d{2}:\\d{2}/.test(String(text))) {
+        window.__axisLabels.push(String(text)); if (window.__axisLabels.length>500) window.__axisLabels.shift();
+      }
+      return original.call(this,text,...args);
+    };`})
+  await pageCdp.send('Page.navigate',{url:`http://127.0.0.1:${uiPort}/`})
+  await waitText('[data-testid="market-status"]','Market closed')
+  await waitText('[data-testid="detail-close"]','100')
+  await waitExactText('[data-testid="socket-status"]','connected')
+  const fullHistory=await fetch(`http://127.0.0.1:${uiPort}/api/history?symbol=AAPL&timeframe=1m&recent=true`,{signal:AbortSignal.timeout(10000)})
+  assert.equal(fullHistory.status,200,'full history passes through Vue proxy')
+  assert.equal((await fullHistory.json()).candles.length,1950,'all five saved sessions are available while closed')
+  await pageCdp.send('Network.enable')
+  await pageCdp.send('Network.setBlockedURLs',{urls:['*/api/indicator-types','*/api/indicators?*']})
+  const selectCompany=async()=>{
+    const point=await evaluate(`(()=>{const el=document.querySelector('[data-testid="watchlist-AAPL"]');el.scrollIntoView();const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+    await pageCdp.send('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:1})
+    await pageCdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1})
+  }
+  await selectCompany()
+  await waitText('[data-testid="indicator-error"]','could not be loaded')
+  await waitText('[data-testid="detail-close"]','100')
+  await waitText('[data-testid="market-status"]','Market closed')
+  await waitExactText('[data-testid="socket-status"]','connected')
+  await pageCdp.send('Network.setBlockedURLs',{urls:[]})
+  await selectCompany()
+  await waitText('[data-testid="detail-close"]','100')
+  log('Closed-market company selection loaded 1,950 saved candles through Vue proxy, including with indicator requests unavailable')
+  const deliver = async (source,receipt,price,volume) => {
+    const r=await fetch(`${apiUrl}/api/market-fixture`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({source_time:source,receipt_time:receipt,price,volume})})
+    assert.ok(r.ok, 'fixture accepted')
+    return r.json()
+  }
+  await deliver('2026-11-16T14:30:05Z','2026-11-16T14:30:06Z',101,4)
+  await waitText('[data-testid="market-status"]','Market open')
+  await waitText('[data-testid="detail-close"]','101')
+  let h=await (await fetch(`${apiUrl}/api/history`)).json()
+  assert.deepEqual(h.candles.slice(-2).map(c=>c.timestamp),['2026-11-13T20:59:00Z','2026-11-16T14:30:00Z'])
+  // Leave room for the first new-session date label at the chart's right edge.
+  const panForLabels=async()=>{
+    const p=await evaluate(`(()=>{const el=document.querySelector('[data-testid="market-chart"]');el.scrollIntoView({block:'center'});const r=el.getBoundingClientRect();return {x:r.x+r.width*.7,y:r.y+r.height*.45,dx:Math.min(220,r.width*.35)}})()`)
+    await pageCdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x,y:p.y})
+    await pageCdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:p.x,y:p.y,button:'left',clickCount:1})
+    for(let i=1;i<=8;i++) await pageCdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x-p.dx*i/8,y:p.y,button:'left',buttons:1})
+    await pageCdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:p.x-p.dx,y:p.y,button:'left',clickCount:1})
+  }
+  await panForLabels()
+  await waitFor(async()=>evaluate(`window.__axisLabels.some(x=>x.includes('11/13/2026')) && window.__axisLabels.some(x=>x.includes('11/16/2026'))`),'dated axis labels on both days')
+  await evaluate('window.__axisLabels = []')
+  await pageCdp.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:false})
+  await panForLabels()
+  await waitFor(async()=>evaluate(`window.__axisLabels.some(x=>x.includes('11/16/2026 14:30'))`),'mobile dated axis')
+  await pageCdp.send('Emulation.clearDeviceMetricsOverride')
+  await deliver('2026-11-16T14:30:20Z','2026-11-16T14:30:21Z',103,9)
+  await waitText('[data-testid="detail-close"]','103')
+  await deliver('2026-11-16T14:30:20Z','2026-11-16T14:30:22Z',103,9)
+  h=await (await fetch(`${apiUrl}/api/history`)).json()
+  assert.equal(h.candles.length,1951)
+  await new Promise((resolve)=>{ backend.once('exit',resolve); backend.kill() })
+  await waitExactText('[data-testid="socket-status"]','disconnected')
+  backend=launch()
+  await ready(`${apiUrl}/api/health`,'Restarted continuous FastAPI')
+  await waitExactText('[data-testid="socket-status"]','connected',30000)
+  await deliver('2026-11-16T14:30:40Z','2026-11-16T14:30:41Z',104,11)
+  await waitText('[data-testid="detail-close"]','104')
+  const latency=[]
+  await evaluate(`window.__visibleTicks = []; new MutationObserver(() => {
+    const value=Number(document.querySelector('[data-testid="detail-close"]')?.textContent);
+    if (value>=105) window.__visibleTicks.push({value,at:Date.now()});
+  }).observe(document.querySelector('[data-testid="detail-close"]'),{childList:true,subtree:true,characterData:true})`)
+  const sent=new Map()
+  const pending=[]
+  for (let i=0;i<100;i++) {
+    const fraction=String(i).padStart(3,'0')
+    const price=105+i/1000
+    pending.push(deliver(`2026-11-16T14:30:42.${fraction}Z`,`2026-11-16T14:30:43.${fraction}Z`,price,12+i)
+      .then(result=>sent.set(price,result.committed_at_ms)))
+    await sleep(10)
+  }
+  await Promise.all(pending)
+  await waitText('[data-testid="detail-close"]','105.099')
+  for (const tick of await evaluate('window.__visibleTicks')) {
+    if (sent.has(tick.value)) latency.push(tick.at-sent.get(tick.value))
+  }
+  assert.ok(latency.length>=2,'browser observed coalesced stress updates')
+  latency.sort((a,b)=>a-b)
+  const p95=latency[Math.floor(latency.length*.95)]
+  assert.ok(p95<=1000,`browser tick p95 ${p95}ms <=1000`)
+  log(`Browser stream stress: 100 observations at 100/s; visible p95=${p95}ms`)
+  const account=await (await fetch(`${apiUrl}/api/paper-account`)).json()
+  assert.equal(account.orders.length,0)
+  log('Continuous browser: Friday/Monday adjacent, dated desktop/mobile axis, in-place update, duplicate, backend restart/reconnect, zero orders')
 }
 
 try {
@@ -477,6 +619,7 @@ try {
 } catch (error) {
   failed = true
   console.error(`[SmokeTest] FAIL ${error.stack || error}`)
+  if (provider?.smokeState) console.error(`[SmokeTest] Provider boundary state: ${JSON.stringify(provider.smokeState)}`)
   for (const record of started) console.error(`[SmokeTest] ${record.name} tail:\n${record.output.slice(-3000)}`)
   if (pageCdp) {
     try {

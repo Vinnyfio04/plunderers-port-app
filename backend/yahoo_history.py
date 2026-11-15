@@ -30,6 +30,9 @@ def iso(time):
 
 
 def initialize(database):
+    from backend.market_store import MarketRecorder
+    with MarketRecorder(database):
+        pass
     with closing(sqlite3.connect(database)) as connection:
         connection.executescript(SCHEMA)
 
@@ -53,6 +56,8 @@ def save_bars(database, symbol, candles, fetched_at, snapshot_at=None):
     initialize(database)
     snapshot_at = snapshot_at or fetched_at
     with closing(sqlite3.connect(database)) as connection:
+        connection.row_factory = sqlite3.Row
+        from backend.candle_store import ingest_bar
         for candle in candles:
             start = datetime.fromisoformat(candle['timestamp'].replace('Z', '+00:00'))
             if start > snapshot_at:
@@ -72,20 +77,23 @@ def save_bars(database, symbol, candles, fetched_at, snapshot_at=None):
             prior = connection.execute('''SELECT payload_hash, completed FROM yahoo_minute_bars
                 WHERE ticker=? AND timestamp=? ORDER BY bar_id DESC LIMIT 1''',
                 (symbol, candle['timestamp'])).fetchone()
-            if completed and prior == (digest, completed):
+            if completed and prior and tuple(prior) == (digest, completed):
                 continue
             connection.execute('''INSERT OR IGNORE INTO yahoo_minute_bars
                 (ticker,timestamp,fetched_at,snapshot_at,candle_json,completed,payload_hash)
                 VALUES (?,?,?,?,?,?,?)''', (symbol, candle['timestamp'], iso(fetched_at),
                 iso(snapshot_at), encoded, completed, digest))
+            bar = connection.execute('SELECT * FROM yahoo_minute_bars WHERE bar_id=last_insert_rowid()').fetchone()
+            ingest_bar(connection,bar)
         connection.commit()
 
 
-def fetch_recent(database, symbol='AAPL'):
+def fetch_recent(database, symbol='AAPL', start=None, download_only=False):
     initialize(database)
     started = datetime.now(timezone.utc)
     try:
-        frame = yf.Ticker(symbol).history(period='5d', interval='1m', prepost=False,
+        query = {'start':start} if start else {'period':'5d'}
+        frame = yf.Ticker(symbol).history(**query, interval='1m', prepost=False,
                                          auto_adjust=False, actions=False, timeout=10)
         if frame.empty:
             raise ValueError('Yahoo returned no minute bars')
@@ -99,18 +107,30 @@ def fetch_recent(database, symbol='AAPL'):
         if not candles:
             raise ValueError('Yahoo returned no usable minute bars')
         fetched = datetime.now(timezone.utc)
-        save_bars(database, symbol, candles, fetched, started)
+        if not download_only:
+            save_bars(database, symbol, candles, fetched, started)
         status, message = 'ok', None
     except Exception as error:
         candles = []
         fetched = datetime.now(timezone.utc)
         status, message = 'unavailable', f'Yahoo minute history unavailable ({type(error).__name__}); using saved data.'
+    if download_only:
+        return dict(status=status,bar_count=len(candles),message=message,candles=candles,fetched=fetched,started=started)
     with closing(sqlite3.connect(database)) as connection:
         connection.execute('''INSERT INTO yahoo_history_fetches
             (ticker,fetched_at,status,bar_count,message) VALUES (?,?,?,?,?)''',
             (symbol, iso(fetched), status, len(candles), message))
         connection.commit()
     return {'status': status, 'bar_count': len(candles), 'message': message}
+
+
+def persist_download(database, symbol, result):
+    if result['status']=='ok':
+        save_bars(database,symbol,result['candles'],result['fetched'],result['started'])
+    with closing(sqlite3.connect(database)) as c:
+        c.execute('INSERT INTO yahoo_history_fetches(ticker,fetched_at,status,bar_count,message) VALUES (?,?,?,?,?)',
+                  (symbol,iso(result['fetched']),result['status'],result['bar_count'],result['message']))
+        c.commit()
 
 
 def available_bars(connection, symbol, now):

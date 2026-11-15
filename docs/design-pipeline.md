@@ -1,5 +1,53 @@
 # Design pipeline
 
+## Company selection while the market is closed
+
+Live / History selection requests the recent-history route independently of exchange status. `recent=true` enables an on-demand download when appropriate: initial empty stores wait at most 12 seconds, while populated stores return their indexed cache immediately and reconcile in the background. The startup scheduler and selection route share a per-symbol download task, and rapid selections share/throttle attempts for 60 seconds. Explicit fixture/live-off modes and as-of/cursor reads never initiate this download. Failed downloads preserve the cache and their fetch audit. External waits stay outside the SQLite writer.
+
+Vue renders candles and connects the market socket before loading indicator/account/automation panels. It retains the last successful symbol/timeframe response during a retry, times out stalled history requests, and retries with bounded backoff. Empty-state text distinguishes loading/unavailable history from exchange closure. The Vite API proxy uses Node's installed HTTP keep-alive agent because `Connection: close` reproduced upstream resets on this machine. The full-size history regression exercises the response through Vue's URL; small fixtures alone had not detected that failure. Replay range controls wait for their saved selection before Start is enabled.
+
+## Current continuous pipeline — November 14, 2026
+
+This section supersedes the historical descriptions below where they mention browser-owned collection, a CSV default, the old database path, or rebuilding raw history on every timer tick.
+
+```text
+Backend startup -> database owner lock -> backup/migrate -> backend/data/market.db
+                            |
+Exchange calendar -> Yahoo WebSocket (one backend-owned collector)
+                            |
+                      bounded FIFO writer
+                            |
+           observations + receipts + dirty minute projection
+                            |
+Yahoo recent history -> completed/provisional bar versions
+                            |
+                  effective candles_1m + revisions/provenance
+                            |
+       bounded indexed history / requested session aggregation
+                            |
+              HTTP snapshot + committed revision watermark
+                            |
+          WebSocket changes (250 ms display coalescing)
+                            |
+              Vue candlesticks / volume / indicators
+```
+
+The central `backend/database.py` path is shared by observations, replay, indicators, decisions, voice and the paper account. `MARKET_DATABASE` overrides it for isolated tests. The backup-API migration copies the entire legacy store, preserves its original IDs and tables, validates integrity/counts/foreign keys, retains the source recovery copy and applies versioned schema changes. A process lock rejects another backend using the same database. Run one Uvicorn worker.
+
+`backend/candle_store.py` owns the current projection and its schema. `instruments` maps symbols to integer IDs/calendar/timezone. `candles_1m` has a `(instrument_id, minute_start)` WITHOUT ROWID primary key, typed OHLC prices, nullable integer volume, completion, session, source, revision ID and update milliseconds. `candle_revisions` appends changed OHLCV/completion states with availability milliseconds and indexes for minute/as-of and change-stream queries. `candle_provenance` links each revision to its Yahoo bar or observation IDs. `yahoo_minute_values` provides indexed typed bar versions, while the original bar JSON/fetch audit remains available. `ingestion_state` keeps the last processed receipt/source time and reconciliation watermark. `schema_migrations` records completed upgrades.
+
+Original `observations`/`receipts` are retained with additive instrument IDs and integer receipt milliseconds; indexes support affected source-time ranges, revision links, receipt ordering and availability. A repeat preserves its receipt but creates no new effective candle. A changed distinct message remains independent unless explicit supersession identifies a revision. Source-time ordering determines OHLC; receipt ordering determines when a late/corrected value becomes visible. Only the affected minute and adjacent baseline-dependent minutes are recomputed. Known zero and unknown volume remain distinct. Completed Yahoo bars replace whole minutes; provisional quote overlays retain unknown volume, never added volume.
+
+`backend/write_coordinator.py` serializes accepted market events and fast simulator/configuration writes with bounded queue backpressure. External network/model waits happen outside that queue; their saved results reenter it. Each market receipt/projection is one short transaction, with WAL, busy timeout and synchronous FULL; paper fills retain their existing atomic cash/position/P&L transaction. Changes are published only after commit. The completion timer runs even without browsers and stores actual completion transitions. There is no routine whole-store tick scan.
+
+`CandleHub.start` owns collection for the backend lifetime. Closed sessions wait on the exchange calendar; open-session failures retry with exponential backoff/jitter. Catch-up/history downloads run in the background and save through the writer, overlapping recent minutes instead of fetching five days repeatedly. The browser does not own or stop collection. Market session, source age, upstream status, local socket status and history-fetch errors are independent. Old/out-of-session quotes do not become fresh current-market candles.
+
+The history route bounds output to 2,000 candles and underlying minute work to a bounded window, returning an earlier-page cursor. Larger intervals use the existing session-open aggregation. Initial WebSocket snapshots carry a committed watermark; later messages carry changed candles with their symbol, interval and status alongside the same six fields. Slow-client queues are bounded; overflow triggers reconnect/resnapshot. Vue retries connections with generation guards, retains at most 6,000 candle points and loads older pages on leftward scrolling. Indicator and snapshot context comes from validated backend warm-up windows rather than browser paging. Existing completed history is baselined so reconnect/backfill cannot create historical automation executions.
+
+Both bottom ticks and crosshair use `MM/DD/YYYY HH:mm` UTC. At reopening, the next actual candle follows the previous actual candle in the chart's logical sequence; its real timestamp preserves the overnight/date gap without fabricated whitespace data. The latest-price viewport remains stable during in-place updates. Decision capture temporarily renders the frozen cutoff and restores the original viewport afterward.
+
+Recorded-session replay still uses original receipts in their arrival order and does not write back to the recorded source. Imported bar/revision history is available only after its recorded fetch/receipt availability in as-of reads. The legacy `candle_states` audit remains preserved; the production minute projection now uses typed revision/completion rows.
+
 ## Yahoo minute history and live merge
 
 `yahoo_history.fetch_recent -> Yahoo Ticker.history(5d, 1m, prepost=False, auto_adjust=False) -> yahoo_minute_bars -> recorded_history -> aggregate_timeframe -> FastAPI HTTP/WebSocket -> Vue`.

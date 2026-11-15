@@ -24,6 +24,15 @@ Thumbs.db
 *.log
 
 # Local market-data databases
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.db.lock
+*.sqlite3.lock
+*.sqlite.lock
+*.migration
+*.backup
 *.sqlite
 *.sqlite3
 *.sqlite3-shm

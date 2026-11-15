@@ -21,18 +21,13 @@ export function toChartTime(timestamp) {
   return Math.floor(milliseconds / 1000)
 }
 
-function formatChartTime(time) {
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: 'UTC',
-  }).format(new Date(time * 1000))
+export function formatChartTime(time) {
+  const date = new Date(typeof time === 'number' ? time * 1000 : `${time.year}-${String(time.month).padStart(2,'0')}-${String(time.day).padStart(2,'0')}T00:00:00Z`)
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${pad(date.getUTCMonth()+1)}/${pad(date.getUTCDate())}/${date.getUTCFullYear()} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`
 }
 
-export function createCandleChart(container, candles, onInspect) {
+export function createCandleChart(container, candles, onInspect, onLoadOlder = () => {}) {
   const chart = createChart(container, {
     autoSize: true,
     height: 500,
@@ -62,6 +57,8 @@ export function createCandleChart(container, candles, onInspect) {
       scaleMargins: { top: 0.07, bottom: 0.31 },
     },
     timeScale: {
+      tickMarkFormatter: formatChartTime,
+      tickMarkMaxCharacterLength: 16,
       borderColor: '#e1e5ea',
       timeVisible: true,
       secondsVisible: false,
@@ -183,9 +180,18 @@ export function createCandleChart(container, candles, onInspect) {
   }
 
   chart.subscribeCrosshairMove(handleCrosshairMove)
+  const onRange = (range) => { if (range && range.from < 5 && !isCapturing) onLoadOlder() }
+  chart.timeScale().subscribeVisibleLogicalRangeChange(onRange)
   chart.timeScale().fitContent()
 
   return {
+    setCandles(history) {
+      const visible = chart.timeScale().getVisibleRange()
+      candlesByTime.clear()
+      for (const candle of history) candlesByTime.set(toChartTime(candle.timestamp), {...candle,time:toChartTime(candle.timestamp)})
+      applyCandleData([...candlesByTime.values()].sort((a,b) => a.time-b.time))
+      if (visible) chart.timeScale().setVisibleRange(visible)
+    },
     setIndicators(instances) {
       indicatorInstances = instances
       if (!isCapturing) applyIndicatorData(indicatorInstances)
@@ -245,6 +251,7 @@ export function createCandleChart(container, candles, onInspect) {
       )
     },
     async captureThrough(cutoffTimestamp, frozenIndicators) {
+      const originalRange = chart.timeScale().getVisibleRange()
       const cutoffTime = toChartTime(cutoffTimestamp)
       const frozenCandles = [...candlesByTime.values()]
         .filter((candle) => candle.time <= cutoffTime)
@@ -266,10 +273,11 @@ export function createCandleChart(container, candles, onInspect) {
         )
         applyCandleData(currentCandles)
         applyIndicatorData(indicatorInstances)
-        chart.timeScale().fitContent()
+        if (originalRange) chart.timeScale().setVisibleRange(originalRange)
       }
     },
     destroy() {
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange)
       chart.unsubscribeCrosshairMove(handleCrosshairMove)
       chart.remove()
     },

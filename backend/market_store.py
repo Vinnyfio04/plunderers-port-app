@@ -5,10 +5,11 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+from contextlib import nullcontext
 from typing import Any
 
 
-DEFAULT_DATABASE = Path(__file__).resolve().parent / "data" / "market-observations.sqlite3"
+from backend.database import DEFAULT_DATABASE
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS observations (
@@ -129,8 +130,12 @@ class MarketRecorder:
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.execute("PRAGMA journal_mode = WAL")
+        self.connection.execute('PRAGMA busy_timeout=5000')
+        self.connection.execute('PRAGMA synchronous=FULL')
         self.connection.executescript(SCHEMA)
         self.connection.commit()
+        from backend.candle_store import initialize
+        initialize(self.connection)
 
     def close(self) -> None:
         self.connection.close()
@@ -141,7 +146,16 @@ class MarketRecorder:
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         self.close()
 
-    def record_message(
+    def record_message(self, message, backend_receipt_time, ticker=None, supersedes_observation_id=None):
+        with self.connection:
+            result = self._record_message(message, backend_receipt_time, ticker, supersedes_observation_id)
+            from backend.candle_store import record_effect
+            symbol = str(message.get('id') or ticker or '').strip().upper()
+            source_ms = describe_source_time(message.get('time'))['source_time_epoch_ms']
+            record_effect(self.connection, symbol, result, source_ms, round(backend_receipt_time.timestamp()*1000))
+            return result
+
+    def _record_message(
         self,
         message: dict[str, Any],
         backend_receipt_time: datetime,
@@ -156,7 +170,7 @@ class MarketRecorder:
         source_time = describe_source_time(message.get("time"))
         receipt_time = normalize_receipt_time(backend_receipt_time)
 
-        with self.connection:
+        with nullcontext():
             existing = self.connection.execute(
                 """
                 SELECT observation_id, supersedes_observation_id

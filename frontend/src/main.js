@@ -77,7 +77,9 @@ createApp({
     const timeframe = ref('1m')
     const status = ref('Loading 1m candles…')
     const error = ref('')
-    const source = ref('Local synthetic history')
+    const source = ref('Yahoo Finance history')
+    const historyLoading = ref(false)
+    const historyMessage = ref('')
     const historyKind = ref('recorded')
     const marketState = ref(null)
     const historyFetch = ref(null)
@@ -97,6 +99,7 @@ createApp({
     const replayReceiptTime = ref(null)
     const replayProgress = ref('Not started')
     const replayStoredCount = ref(null)
+    const replaySelectionLoading = ref(false)
     const indicatorTypes = ref([])
     const indicators = ref([])
     const indicatorType = ref('sma')
@@ -104,6 +107,7 @@ createApp({
     const indicatorWindow = ref('2')
     const indicatorError = ref('')
     const indicatorNotice = ref('')
+    const chartContextLoading = ref(true)
     const indicatorWindowDraft = ref({})
     const paperAccount = ref(null)
     const paperQuantity = ref('1')
@@ -145,6 +149,49 @@ createApp({
     let sourceAgeMeasuredAt = null
     let ageTimer = null
     let replayIndicatorGeneration = 0
+    let reconnectTimer = null
+    let reconnectDelay = 1000
+    let nextBefore = null
+    let olderLoading = false
+    let lastWatermark = 0
+    let followingLatest = true
+    let indicatorMutationVersion = 0
+    const historyCache = new Map()
+    let historyRetryTimer = null
+    let historyRetryDelay = 2000
+
+    const loadOlder = async () => {
+      if (mode.value !== 'live' || !nextBefore || olderLoading) return
+      olderLoading = true
+      const generation = requestGeneration
+      try {
+        const before = nextBefore
+        const query = new URLSearchParams({symbol:symbol.value,timeframe:timeframe.value,before,limit:'2000'})
+        const response = await fetch(`/api/history?${query}`)
+        if (!response.ok) throw new Error('Earlier history could not be loaded')
+        const page = await response.json()
+        if (generation !== requestGeneration) return
+        nextBefore = page.next_before
+        const merged = new Map([...page.candles,...candles.value].map((c) => [c.timestamp,c]))
+        const ordered = [...merged.values()].sort((a,b) => a.timestamp.localeCompare(b.timestamp))
+        followingLatest = ordered.length <= 6000
+        candles.value = ordered.slice(0,6000)
+        candleStatusByTime.value = {...Object.fromEntries(page.status.map((s) => [s.timestamp,s])),...candleStatusByTime.value}
+        chartAdapter?.setCandles(candles.value)
+        const indicatorResponse = await fetch(`/api/indicators?${query}`)
+        if (indicatorResponse.ok && generation === requestGeneration) {
+          const previous = (await indicatorResponse.json()).instances
+          const times = new Set(candles.value.map((c) => c.timestamp))
+          indicators.value = indicators.value.map((item) => {
+            const older = previous.find((p) => p.indicator_id === item.indicator_id)
+            const values = new Map([...(older?.values ?? []),...item.values].map((point) => [point.timestamp,point]))
+            return {...item,values:[...values.values()].filter((p) => times.has(p.timestamp)).sort((a,b) => a.timestamp.localeCompare(b.timestamp))}
+          })
+          chartAdapter?.setIndicators(indicators.value)
+        }
+      } catch (failure) { error.value = failure.message }
+      finally { olderLoading = false }
+    }
 
     const selectCandle = (timestamp) => {
       selectedCandle.value =
@@ -164,6 +211,7 @@ createApp({
         (candle) => {
           selectedCandle.value = candle
         },
+        loadOlder,
       )
       chartAdapter.setIndicators(indicators.value)
     }
@@ -179,6 +227,10 @@ createApp({
         next.sort((left, right) => left.timestamp.localeCompare(right.timestamp))
       }
       candles.value = next
+      if (next.length > 6000) {
+        candles.value = next.slice(-6000)
+        chartAdapter?.setCandles(candles.value)
+      }
       selectedCandle.value = candle
       chartAdapter?.updateCandle(candle)
     }
@@ -186,6 +238,7 @@ createApp({
     const analyzeCandle = async (selected, automated = false) => {
       decisionError.value = ''
       decisionResult.value = null
+      if (chartContextLoading.value) throw new Error('Chart settings are loading. Wait for the indicator panel, then retry.')
       if (!selected) {
         decisionError.value = 'Select a candle before asking about the chart.'
         throw new Error(decisionError.value)
@@ -504,6 +557,8 @@ createApp({
     }
 
     const connectCandleStream = (generation) => {
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
+      reconnectTimer = null
       socket?.close()
       backendSocketStatus.value = 'connecting'
       const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
@@ -512,8 +567,28 @@ createApp({
       url.searchParams.set('timeframe', timeframe.value)
       const activeSocket = new WebSocket(url)
       socket = activeSocket
+      let retryScheduled = false
+      const retry = () => {
+        if (retryScheduled || generation !== requestGeneration || socket !== activeSocket || mode.value !== 'live') return
+        retryScheduled = true
+        backendSocketStatus.value = 'disconnected'
+        feedStatus.value = 'unavailable'
+        reconnectTimer = window.setTimeout(() => {
+          if (generation === requestGeneration && mode.value === 'live') connectCandleStream(generation)
+        }, reconnectDelay)
+        reconnectDelay = Math.min(30000,reconnectDelay*2)
+      }
+      // A failed proxy upgrade can leave CONNECTING open without delivering close.
+      const connectionDeadline = window.setTimeout(() => {
+        if (generation === requestGeneration && socket === activeSocket && activeSocket.readyState !== WebSocket.OPEN) {
+          retry()
+          activeSocket.close()
+        }
+      }, 5000)
 
       activeSocket.addEventListener('open', () => {
+        window.clearTimeout(connectionDeadline)
+        reconnectDelay = 1000
         if (generation === requestGeneration) backendSocketStatus.value = 'connected'
       })
       activeSocket.addEventListener('message', (event) => {
@@ -523,7 +598,19 @@ createApp({
         if (message.market) marketState.value = message.market
         if (message.history_fetch) historyFetch.value = message.history_fetch
         if (message.type === 'history') {
-          resetChart(message.candles, message.status)
+          nextBefore = message.next_before
+          lastWatermark = message.watermark ?? 0
+          candles.value = message.candles
+          candleStatusByTime.value = Object.fromEntries(message.status.map((s) => [s.timestamp,s]))
+          selectedCandle.value = candles.value.at(-1) ?? null
+          completion.value = message.status.at(-1) ?? null
+          source.value = message.source
+          historyKind.value = message.data_kind ?? 'recorded'
+          historyMessage.value = message.message ?? ''
+          historyLoading.value = false
+          status.value = candles.value.length ? `${candles.value.length} ${timeframe.value} candles · UTC` : 'Recent history unavailable · retrying'
+          if (candles.value.length) error.value = ''
+          chartAdapter?.setCandles(candles.value)
           for (const item of message.status) {
             if (item.interval_ended) automationSeen.add(`${symbol.value}|${timeframe.value}|${item.timestamp}`)
           }
@@ -539,6 +626,11 @@ createApp({
           sourceAgeSeconds.value = sourceAgeBase
         }
         if (message.type === 'candle') {
+          if (message.watermark && message.watermark < lastWatermark) return
+          lastWatermark = message.watermark ?? lastWatermark
+          if (!followingLatest && message.candle.timestamp > candles.value.at(-1)?.timestamp) return
+          if (candles.value.length && message.candle.timestamp < candles.value[0].timestamp) return
+          const priorLatest = candles.value.at(-1)?.timestamp
           liveCandleSource.value = message.source
           lastLiveCandleTime.value = message.candle.timestamp
           const wasEnded = candleStatusByTime.value[message.candle.timestamp]?.interval_ended
@@ -548,21 +640,26 @@ createApp({
             [message.candle.timestamp]: message.completion,
           }
           replaceOrAppendCandle(message.candle)
-          if (message.completion?.interval_ended && !wasEnded) automateCompleted(message.candle)
+          if (message.completion?.interval_ended && !wasEnded && (!priorLatest || message.candle.timestamp >= priorLatest)
+              && (!message.market || message.market.status === 'open')) automateCompleted(message.candle)
           status.value = `${candles.value.length} ${timeframe.value} candles · UTC`
           loadIndicators(generation).catch((failure) => { indicatorError.value = failure.message })
           loadPaperAccount()
         }
       })
       activeSocket.addEventListener('error', () => {
-        if (generation === requestGeneration) { backendSocketStatus.value = 'error'; feedStatus.value = 'unavailable' }
+        window.clearTimeout(connectionDeadline)
+        retry()
+        activeSocket.close()
       })
       activeSocket.addEventListener('close', () => {
-        if (generation === requestGeneration) { backendSocketStatus.value = 'disconnected'; feedStatus.value = 'unavailable' }
+        window.clearTimeout(connectionDeadline)
+        retry()
       })
     }
 
     const loadIndicators = async (generation = requestGeneration) => {
+      const version = indicatorMutationVersion
       const query = new URLSearchParams({
         symbol: symbol.value,
         timeframe: timeframe.value,
@@ -576,7 +673,7 @@ createApp({
       }
       const typesPayload = await typesResponse.json()
       const instancesPayload = await instancesResponse.json()
-      if (generation !== requestGeneration) return
+      if (generation !== requestGeneration || version !== indicatorMutationVersion) return
       indicatorTypes.value = typesPayload.types
       indicators.value = instancesPayload.instances
       indicatorWindowDraft.value = Object.fromEntries(
@@ -601,6 +698,7 @@ createApp({
     }
 
     const createIndicator = async (event) => {
+      indicatorMutationVersion += 1
       event.preventDefault()
       indicatorError.value = ''
       indicatorNotice.value = ''
@@ -635,6 +733,7 @@ createApp({
     }
 
     const updateIndicator = async (instance) => {
+      indicatorMutationVersion += 1
       indicatorError.value = ''
       indicatorNotice.value = ''
       try {
@@ -731,6 +830,11 @@ createApp({
     }
 
     const loadDashboard = async (nextTimeframe) => {
+      if (historyRetryTimer !== null) window.clearTimeout(historyRetryTimer)
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
+      socket?.close()
+      socket = null
+      followingLatest = true
       const generation = ++requestGeneration
       mode.value = 'live'
       timeframe.value = nextTimeframe
@@ -739,22 +843,34 @@ createApp({
       status.value = `Loading ${nextTimeframe} candles…`
       feedStatus.value = 'connecting'
       feedDetail.value = ''
-      source.value = 'Local synthetic history'
+      source.value = 'Yahoo Finance history'
+      historyLoading.value = true
+      chartContextLoading.value = true
+      historyMessage.value = ''
       liveCandleSource.value = null
       lastLiveCandleTime.value = null
       replayObservationTime.value = null
       sourceAgeBase = null
       sourceAgeMeasuredAt = null
       sourceAgeSeconds.value = null
+      const cacheKey = `${symbol.value}|${nextTimeframe}`
+      const cached = historyCache.get(cacheKey)
+      completion.value = cached?.status.at(-1) ?? null
+      resetChart(cached?.candles ?? [], cached?.status ?? [])
 
       try {
-        const query = new URLSearchParams({ symbol: symbol.value, timeframe: nextTimeframe })
-        const response = await fetch(`/api/history?${query}`)
+        const query = new URLSearchParams({ symbol: symbol.value, timeframe: nextTimeframe, recent: 'true' })
+        const response = await fetch(`/api/history?${query}`, {signal: AbortSignal.timeout(15000)})
         if (!response.ok) throw new Error(`History request failed with status ${response.status}`)
         const historyResponse = await response.json()
         if (generation !== requestGeneration) return
         const history = historyResponse.candles
+        nextBefore = historyResponse.next_before
+        lastWatermark = historyResponse.watermark ?? 0
         if (!Array.isArray(history)) throw new Error('Invalid candle history response')
+        historyCache.set(cacheKey,historyResponse)
+        historyRetryDelay = 2000
+        historyMessage.value = historyResponse.message ?? ''
         historyKind.value = historyResponse.data_kind ?? 'test'
         marketState.value = historyResponse.market ?? null
         historyFetch.value = historyResponse.history_fetch ?? null
@@ -767,13 +883,8 @@ createApp({
         }
         completion.value = historyResponse.status[historyResponse.status.length - 1]
         resetChart(history, historyResponse.status)
-        await loadIndicators(generation)
-        await loadPaperAccount()
-        await loadAutomation()
-        if (automation.value?.enabled) {
-          for (const item of historyResponse.status) {
-            if (item.interval_ended) automationSeen.add(`${symbol.value}|${timeframe.value}|${item.timestamp}`)
-          }
+        for (const item of historyResponse.status) {
+          if (item.interval_ended) automationSeen.add(`${symbol.value}|${timeframe.value}|${item.timestamp}`)
         }
         status.value = history.length ? `${history.length} ${historyResponse.timeframe} candles · UTC`
           : 'No recorded candles · waiting for feed'
@@ -782,12 +893,24 @@ createApp({
           backendSocketStatus.value = 'disconnected'
           feedStatus.value = 'disabled'
         } else connectCandleStream(generation)
+        // Supporting panels cannot block a usable market chart or its live socket.
+        loadIndicators(generation)
+          .catch((failure) => { if (generation === requestGeneration) indicatorError.value = `Indicator configuration could not be loaded: ${failure.message}` })
+          .finally(() => { if (generation === requestGeneration) chartContextLoading.value = false })
+        loadPaperAccount().catch((failure) => { paperError.value = failure.message })
+        loadAutomation().catch((failure) => { automationError.value = failure.message })
       } catch (requestError) {
         if (generation === requestGeneration) {
-          error.value = requestError.message
-          status.value = 'Candle history unavailable'
-          backendSocketStatus.value = 'disconnected'
+          error.value = `${requestError.message}. Retrying recent history; check that FastAPI is running.`
+          status.value = candles.value.length ? `${candles.value.length} saved candles · retrying history` : 'Recent history unavailable · retrying'
+          connectCandleStream(generation)
+          historyRetryTimer = window.setTimeout(() => {
+            if (generation === requestGeneration && mode.value === 'live') loadDashboard(nextTimeframe)
+          }, historyRetryDelay)
+          historyRetryDelay = Math.min(30000,historyRetryDelay*2)
         }
+      } finally {
+        if (generation === requestGeneration) historyLoading.value = false
       }
     }
 
@@ -814,6 +937,8 @@ createApp({
     }
 
     const loadReplaySelections = async (preferredSymbol = null) => {
+      chartContextLoading.value = true
+      replaySelectionLoading.value = true
       const generation = ++requestGeneration
       socket?.close()
       mode.value = 'replay'
@@ -850,6 +975,8 @@ createApp({
           error.value = requestError.message
           status.value = 'Replay unavailable'
         }
+      } finally {
+        if (generation === requestGeneration) { replaySelectionLoading.value = false; chartContextLoading.value = false }
       }
     }
 
@@ -940,7 +1067,7 @@ createApp({
     onMounted(() => {
       loadDashboard('1m')
       loadWatchlist()
-      loadSavedDecisions()
+      loadSavedDecisions().catch((failure) => { voiceError.value = failure.message })
       ageTimer = window.setInterval(() => {
         if (sourceAgeBase !== null && sourceAgeMeasuredAt !== null) {
           sourceAgeSeconds.value = sourceAgeBase + (Date.now() - sourceAgeMeasuredAt) / 1000
@@ -950,6 +1077,8 @@ createApp({
     })
 
     onBeforeUnmount(() => {
+      if (historyRetryTimer !== null) window.clearTimeout(historyRetryTimer)
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
       releaseVoice()
       requestGeneration += 1
       socket?.close()
@@ -1032,7 +1161,7 @@ createApp({
                   onInput: (event) => { indicatorWindow.value = event.target.value },
                 }),
               ]),
-              h('button', { class: 'replay-button', type: 'submit' }, 'Add indicator'),
+              h('button', { class: 'replay-button', type: 'submit', disabled: chartContextLoading.value }, 'Add indicator'),
             ]),
             indicatorError.value
               ? h('p', { class: 'error', role: 'alert', 'data-testid': 'indicator-error' }, indicatorError.value)
@@ -1233,6 +1362,7 @@ createApp({
             h('label', { class: 'timeframe-picker' }, [
               h('span', 'Start UTC'),
               h('input', {
+                'aria-label': 'Replay start UTC',
                 type: 'datetime-local',
                 step: '1',
                 value: replayStart.value,
@@ -1242,13 +1372,15 @@ createApp({
             h('label', { class: 'timeframe-picker' }, [
               h('span', 'End UTC (exclusive)'),
               h('input', {
+                'aria-label': 'Replay end UTC',
                 type: 'datetime-local',
                 step: '1',
                 value: replayEnd.value,
                 onInput: (event) => { replayEnd.value = event.target.value },
               }),
             ]),
-            h('button', { class: 'replay-button', type: 'button', onClick: startReplay }, 'Start Replay'),
+            h('button', { class: 'replay-button', type: 'button', onClick: startReplay,
+              disabled: replaySelectionLoading.value || !replayStart.value || !replayEnd.value }, 'Start Replay'),
           ])
         : null
 
@@ -1264,7 +1396,7 @@ createApp({
           h('button', {
             class: 'replay-button',
             type: 'button',
-            disabled: decisionLoading.value || !selected,
+            disabled: decisionLoading.value || chartContextLoading.value || !selected,
             onClick: askAboutChart,
             'data-testid': 'ask-about-chart',
           }, decisionLoading.value ? 'Analyzing…' : 'Ask about chart'),
@@ -1375,6 +1507,7 @@ createApp({
         h('p', { class: 'sidebar-note' }, 'Symbols available from this local workspace.'),
         h('p', { class: 'watchlist-group' }, 'LIVE / HISTORY'),
         h('button', { type: 'button', class: `watchlist-row ${mode.value === 'live' ? 'is-selected' : ''}`,
+          'data-testid': 'watchlist-AAPL',
           onClick: () => loadDashboard(timeframe.value) }, [
           h('span', { class: 'symbol-mark' }, 'A'),
           h('span', { class: 'watchlist-name' }, [h('strong', 'AAPL'), h('small', 'Apple · local history')]),
@@ -1413,6 +1546,7 @@ createApp({
                 onChange: (event) => changeTimeframe(event.target.value),
               }, TIMEFRAMES.map(([value, label]) => h('option', { value }, label))),
             ]),
+            h('button', { class: 'toolbar-button', type: 'button', onClick: () => loadDashboard(timeframe.value) }, 'Latest · UTC'),
             h('button', { class: 'toolbar-button', type: 'button', onClick: () => {
               const dock = document.querySelector('.indicator-dock')
               if (dock) { dock.open = true; dock.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }
@@ -1476,10 +1610,12 @@ createApp({
             mode.value === 'live' && marketState.value
               ? h('p', { class: 'market-session-notice', 'data-testid': 'market-session' },
                   `${marketState.value.label} · Regular session · Next open ${marketState.value.next_open}. Prices retain their source timestamps.`) : null,
-            historyFetch.value?.status === 'unavailable'
+            historyFetch.value?.message
               ? h('p', { class: 'error', role: 'status', 'data-testid': 'history-fetch-error' }, historyFetch.value.message) : null,
             mode.value === 'live' && !candles.value.length
-              ? h('p', { class: 'sample-notice', role: 'status' }, 'No recorded regular-session candles. Waiting for live observations; try Replay to inspect a saved session.') : null,
+              ? h('p', { class: 'sample-notice', role: 'status' }, historyLoading.value
+                  ? 'Loading recent trading-session history. Market-closed hours do not prevent historical candles from loading.'
+                  : historyMessage.value || 'Recent history is unavailable. Retrying the backend; the market does not need to be open.') : null,
             feedDetail.value ? h('p', { class: 'feed-detail', 'data-testid': 'feed-detail' }, feedDetail.value) : null,
             error.value ? h('p', { class: 'error', role: 'alert' }, error.value) : null,
             h('section', { class: 'chart-panel', 'aria-label': mode.value === 'replay' ? 'Replay chart' : 'Market chart' }, [

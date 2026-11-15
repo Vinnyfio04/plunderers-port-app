@@ -7,6 +7,7 @@
 - Preserve existing student work and keep changes limited to the current task.
 - Show the proposed or completed changes for student review before making a commit. Do not commit unreviewed work.
 - Reuse the installed Python environment. Do not create or recreate a virtual environment by default.
+- The production store is `backend/data/market.db`; use the central database module and versioned migrations. Preserve the legacy recovery copy and all account/decision IDs. Use a separate `MARKET_DATABASE` for fixtures, one Uvicorn worker, and the backend-owned collector. Keep full history scans out of normal tick/chart-update paths.
 
 ## Prompts, results, and secrets
 

@@ -1,6 +1,18 @@
 # Current project state
 
-**Updated:** November 12, 2026
+**Updated:** November 14, 2026
+
+## Latest handoff — continuous market and market.db
+
+This section supersedes older database-path/lifecycle statements below. On branch `ui-rework`, implemented prompt 24 and the continuous-market plan. Added `backend/database.py`, `candle_store.py`, `write_coordinator.py`, `check_continuous.py`, `continuous_fixture.py` and prompt 24; preserved prompt 23 and its plan. Changed recorder/importer/indexed history, backend-owned collector/reconciliation, FastAPI writer/snapshot context, Vue dated axis/paging/reconnect, SmokeTest, ignores, README, AGENTS, design/assignment/verification docs. No package/lockfile change or commit.
+
+The normal store is now `backend/data/market.db`, migrated by `python -m backend.database` using the installed Python 3.13 executable. All 16 original tables matched their original values before ingestion resumed. Legacy `market-observations.sqlite3` remains as a recovery copy. Schema versions 1/2, integrity and foreign-key checks passed. All consumers use the central path; use one Uvicorn worker, and separate `MARKET_DATABASE` overrides for fixtures. Do not combine recovery and current stores automatically.
+
+`node scripts/smoke-test.mjs` passed twice with real Chrome, Vue and FastAPI, isolated SQLite and stubbed Yahoo/model boundaries. New coverage includes migration/ownership/recovery, recording without tabs, indexed one-million-candle scale, Friday/Monday continuation, dated desktop/mobile canvas labels, in-place/repeat updates and backend restart/reconnect. Second run history p95 110.926 ms, queued writes p95 192.808 ms and commit-to-visible p95 189 ms. Existing replay SMA 10.5, actual PNG payload, visible provider error and reviewed simulator sequence all passed: cash $1,025, shares 0, realized $25/unrealized $0, fills exactly 3. Four AutoLoop corrections and failure evidence are recorded in `docs/verification.md`. Focused Yahoo history, recorded history and timeframe checks, year-boundary formatter, frontend build, Python compile and whitespace checks passed. Test child services/browser and successful databases were cleaned up.
+
+Normal services remain running at `http://127.0.0.1:8000` and `http://127.0.0.1:5173/`; stop each with Ctrl+C in its owning terminal. Health/page return HTTP 200. The actual database/API/browser agree on 1,950 AAPL minutes through Friday November 13 20:59 UTC, close 356.3999938964844 and volume 725503; Market closed, next open Monday November 16 14:30 UTC. Saturday history reconciliation succeeded. Real stream receipt is not inferred from historical download or deterministic fixture checks.
+
+No pending dependency approval or setup question. Next task: during the next regular session, match one real Yahoo observation/receipt ID to its materialized candle, WebSocket update and visible chart, then verify completed-minute volume reconciliation and upstream-unavailable status. Preserve the separate pending live image-model/voice observations. Before resuming, follow `handoffs/create-handoff.md`: read current docs and verify Git status, files, database/schema and the smallest relevant check. Review the current diff with the student before any commit.
 
 ## Current capability
 
@@ -163,3 +175,19 @@ Enable the live feed and verify one real completed Yahoo candle reaches the char
 - Added backend/yahoo_history.py and backend/check_yahoo_history.py, prompt 22, and modified shared recorded history, hub, FastAPI startup/shutdown, Vue market status, and docs. Default startup downloads real Yahoo 1m history; periodic open-session refresh replaces completed minute OHLCV without double counting. Provisional price overlays keep volume unknown until reconciled. Bar revisions/fetches are stored separately from tick receipts.
 - Actual Yahoo returned 1950 bars; API, SQLite and browser agreed on Friday 20:59 UTC close 356.3999938964844 and volume 725503. Backend restart and repeat download retained 1950 versions/minutes. UI showed Market closed, next Monday 14:30 UTC. New reconciliation test, recorded-history regression, full offline browser SmokeTest, build and compilation passed after one Windows connection-cleanup fix.
 - Servers remain on localhost 8000 and 5173. Work is uncommitted on ui-rework. Next: verify one actual in-session WebSocket tick, provisional update and later Yahoo completed-minute reconciliation, comparing stored records, socket and browser. Keep live evidence separate from historical HTTP and mocked tests.
+
+## Latest override — testing stopped at student request (November 14)
+
+Read this section before relying on earlier passing-state claims. Prompt 27 requests a test-scope review and prohibits further testing. No test process remained at inventory; normal servers are still Vue 5173 and FastAPI 8000. Do not launch tests or provider calls without a later instruction superseding that restriction.
+
+Closed-market history has one complete offline passing run (company-history-resumed-2.log). Its repeat passed history/decision/paper behavior but failed forced-restart reconnection. The latest handshake/retry and exact socket-status edits are untested; do not claim two passing final runs. Detailed necessary/redundant check review and prior failures are in docs/verification.md. No commit was made.
+
+The live model has recorded authenticated success from November 12, using labeled synthetic AAPL data and gpt-6-luna for both roles: analyst wait/downward/sufficient, reviewer reject_unsupported_signal, zero orders. Current live authentication is unverified: root .env has a key assignment, this terminal lacks the environment variable, and the backend does not auto-load .env. No new model request was made. A later authorized follow-up should first confirm configuration, then use only the smallest relevant check; avoid rerunning the million-row benchmark for UI/provider-fixture corrections.
+
+## Latest model verification — prompt 28
+
+The student subsequently authorized privately loading the existing .env key and ONE live model request, but no full suite. The normal backend was restarted on 8000 with the key inherited privately; Vue remains on 5173. One POST /api/decisions against an isolated copy of the retained synthetic AAPL chart fixture returned HTTP 201 in 2.36 seconds, with real gpt-6-luna analyst wait/downward/sufficient and reviewer reject_unsupported_signal. Saved decision dec_3e08ce3484904313894a9573970f0425 matches SQLite, remains ineligible after reviewer veto, and created zero orders. Temporary 8018 backend was stopped. No other tests were run. Key value was never displayed or written to new files. Reload the existing .env assignment privately on future backend restarts; the latest reconnect edit is still untested. Detailed evidence is in docs/verification.md.
+
+## Commit handoff — November 15, 2026
+
+The student authorized committing/pushing all pending changes to ui-rework, without further tests. Commit scope includes continuous market.db migration/storage, backend-owned collection and session scheduling, bounded history and chart updates, closed-market loading/proxy fixes, readiness/reconnect changes, verification scripts, prompts and documentation. The latest reconnect changes remain untested. No tests/builds/provider calls were run for this commit task, and [skip ci] is used to skip the push workflow. Credentials, databases and local evidence stay ignored. See docs/verification.md for the actual live-model success and the full regression's remaining reconnect limitation.
