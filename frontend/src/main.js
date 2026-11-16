@@ -80,6 +80,8 @@ createApp({
     const source = ref('Yahoo Finance history')
     const historyLoading = ref(false)
     const historyMessage = ref('')
+    const historyEarliest = ref(null)
+    const historyPolicy = ref(null)
     const historyKind = ref('recorded')
     const marketState = ref(null)
     const historyFetch = ref(null)
@@ -160,6 +162,36 @@ createApp({
     let historyRetryTimer = null
     let historyRetryDelay = 2000
 
+    const chartBarBudget = () => historyPolicy.value?.bar_budget ?? 6000
+
+    const loadEarliestHistory = async () => {
+      if (mode.value!=='live' || !historyEarliest.value || olderLoading) return
+      olderLoading = true
+      const generation = requestGeneration
+      try {
+        const query = new URLSearchParams({symbol:symbol.value,timeframe:timeframe.value,oldest:'true',limit:'2000'})
+        const response = await fetch(`/api/history?${query}`,{signal:AbortSignal.timeout(15000)})
+        if (!response.ok) throw new Error('Earliest interval history could not be loaded')
+        const page = await response.json()
+        if (generation!==requestGeneration) return
+        followingLatest = false
+        nextBefore = page.next_before
+        candles.value = page.candles
+        candleStatusByTime.value = Object.fromEntries(page.status.map(s=>[s.timestamp,s]))
+        selectedCandle.value = page.candles[0] ?? null
+        chartAdapter?.setCandles(page.candles,false)
+        status.value = `${page.candles.length} ${timeframe.value} candles · earliest available ${page.history_earliest?.slice(0,10) ?? 'unknown'} · UTC`
+        if (page.candles.length) {
+          const before = new Date(Date.parse(page.candles.at(-1).timestamp)+1000).toISOString()
+          const response = await fetch(`/api/indicators?${new URLSearchParams({symbol:symbol.value,timeframe:timeframe.value,before})}`)
+          if (!response.ok) throw new Error('Historical indicator values could not be loaded')
+          const payload = await response.json()
+          if (generation===requestGeneration) { indicators.value=payload.instances; chartAdapter?.setIndicators(indicators.value) }
+        }
+      } catch (failure) { if(generation===requestGeneration) error.value=failure.message }
+      finally { olderLoading = false }
+    }
+
     const loadOlder = async () => {
       if (mode.value !== 'live' || !nextBefore || olderLoading) return
       olderLoading = true
@@ -174,8 +206,8 @@ createApp({
         nextBefore = page.next_before
         const merged = new Map([...page.candles,...candles.value].map((c) => [c.timestamp,c]))
         const ordered = [...merged.values()].sort((a,b) => a.timestamp.localeCompare(b.timestamp))
-        followingLatest = ordered.length <= 6000
-        candles.value = ordered.slice(0,6000)
+        followingLatest = ordered.length <= chartBarBudget()
+        candles.value = ordered.slice(0,chartBarBudget())
         candleStatusByTime.value = {...Object.fromEntries(page.status.map((s) => [s.timestamp,s])),...candleStatusByTime.value}
         chartAdapter?.setCandles(candles.value)
         const indicatorResponse = await fetch(`/api/indicators?${query}`)
@@ -227,8 +259,8 @@ createApp({
         next.sort((left, right) => left.timestamp.localeCompare(right.timestamp))
       }
       candles.value = next
-      if (next.length > 6000) {
-        candles.value = next.slice(-6000)
+      if (next.length > chartBarBudget()) {
+        candles.value = next.slice(-chartBarBudget())
         chartAdapter?.setCandles(candles.value)
       }
       selectedCandle.value = candle
@@ -598,6 +630,8 @@ createApp({
         if (message.market) marketState.value = message.market
         if (message.history_fetch) historyFetch.value = message.history_fetch
         if (message.type === 'history') {
+          historyEarliest.value = message.history_earliest ?? message.daily_earliest ?? null
+          historyPolicy.value = message.history_policy ?? null
           nextBefore = message.next_before
           lastWatermark = message.watermark ?? 0
           candles.value = message.candles
@@ -855,6 +889,8 @@ createApp({
       sourceAgeSeconds.value = null
       const cacheKey = `${symbol.value}|${nextTimeframe}`
       const cached = historyCache.get(cacheKey)
+      historyEarliest.value = cached?.history_earliest ?? cached?.daily_earliest ?? null
+      historyPolicy.value = cached?.history_policy ?? null
       completion.value = cached?.status.at(-1) ?? null
       resetChart(cached?.candles ?? [], cached?.status ?? [])
 
@@ -865,6 +901,8 @@ createApp({
         const historyResponse = await response.json()
         if (generation !== requestGeneration) return
         const history = historyResponse.candles
+        historyEarliest.value = historyResponse.history_earliest ?? historyResponse.daily_earliest ?? null
+        historyPolicy.value = historyResponse.history_policy ?? null
         nextBefore = historyResponse.next_before
         lastWatermark = historyResponse.watermark ?? 0
         if (!Array.isArray(history)) throw new Error('Invalid candle history response')
@@ -893,6 +931,12 @@ createApp({
           backendSocketStatus.value = 'disconnected'
           feedStatus.value = 'disabled'
         } else connectCandleStream(generation)
+        if (historyResponse.daily_download_pending || historyResponse.interval_download_pending) {
+          historyMessage.value = `Loading Yahoo ${timeframe.value} history; saved candles remain available.`
+          historyRetryTimer = window.setTimeout(()=>{
+            if (generation===requestGeneration && mode.value==='live') loadDashboard(nextTimeframe)
+          },4000)
+        }
         // Supporting panels cannot block a usable market chart or its live socket.
         loadIndicators(generation)
           .catch((failure) => { if (generation === requestGeneration) indicatorError.value = `Indicator configuration could not be loaded: ${failure.message}` })
@@ -1547,6 +1591,11 @@ createApp({
               }, TIMEFRAMES.map(([value, label]) => h('option', { value }, label))),
             ]),
             h('button', { class: 'toolbar-button', type: 'button', onClick: () => loadDashboard(timeframe.value) }, 'Latest · UTC'),
+            mode.value==='live'
+              ? h('button',{class:'toolbar-button',type:'button',onClick:loadEarliestHistory,
+                  disabled:!historyEarliest.value,'data-testid':timeframe.value==='1d' ? 'earliest-daily' : 'earliest-history',
+                  title:historyEarliest.value ? `Earliest saved record in this chart range: ${historyEarliest.value}` : 'History is loading or unavailable'},
+                  historyEarliest.value ? `Earliest · ${historyEarliest.value.slice(0,10)}` : historyKind.value==='test' ? 'Earliest · fixture range' : historyFetch.value?.status==='unavailable' ? 'Earliest · unavailable' : 'Earliest · loading') : null,
             h('button', { class: 'toolbar-button', type: 'button', onClick: () => {
               const dock = document.querySelector('.indicator-dock')
               if (dock) { dock.open = true; dock.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }
@@ -1612,6 +1661,8 @@ createApp({
                   `${marketState.value.label} · Regular session · Next open ${marketState.value.next_open}. Prices retain their source timestamps.`) : null,
             historyFetch.value?.message
               ? h('p', { class: 'error', role: 'status', 'data-testid': 'history-fetch-error' }, historyFetch.value.message) : null,
+            historyMessage.value && candles.value.length
+              ? h('p',{class:'sample-notice',role:'status'},historyMessage.value) : null,
             mode.value === 'live' && !candles.value.length
               ? h('p', { class: 'sample-notice', role: 'status' }, historyLoading.value
                   ? 'Loading recent trading-session history. Market-closed hours do not prevent historical candles from loading.'
@@ -1620,12 +1671,14 @@ createApp({
             error.value ? h('p', { class: 'error', role: 'alert' }, error.value) : null,
             h('section', { class: 'chart-panel', 'aria-label': mode.value === 'replay' ? 'Replay chart' : 'Market chart' }, [
               mode.value === 'replay' ? h('div', { class: 'chart-mode-banner' }, 'Replay · recorded observations') : null,
-              h('div', { ref: chartContainer, class: 'chart-container', 'data-testid': 'market-chart' }),
+              h('div', { ref: chartContainer, class: 'chart-container', 'data-testid': 'market-chart',
+                title: 'Scroll to zoom. Hold Shift and scroll to move left or right.' }),
             ]),
             h('section', { class: 'feed-panel', 'aria-label': 'Feed status' }, [
               feedItem('Mode', mode.value === 'replay' ? 'Replay · read only' : 'Live', 'feed-mode'),
               feedItem('Symbol', symbol.value, 'feed-symbol'),
               feedItem('Interval', timeframe.value, 'feed-interval'),
+              mode.value==='live' && historyPolicy.value ? feedItem('History range',historyPolicy.value.label,'history-range') : null,
               feedItem('Market session', marketState.value?.label ?? 'Fixture / replay', 'market-status'),
               feedItem('Chart data', mode.value === 'replay' ? 'Recorded replay' : historyKind.value === 'recorded' ? 'Recorded market data' : 'TEST DATA'),
               feedItem('Source', source.value, 'feed-source'),

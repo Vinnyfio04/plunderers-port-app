@@ -31,6 +31,8 @@ class CandleClient:
     timeframe: Timeframe
     sent: dict | None = None
     cursor: int = 0
+    daily_cursor: int = 0
+    interval_cursor: int = 0
     queue: Any = None
     sender: Any = None
 
@@ -86,8 +88,11 @@ class CandleHub:
         client.queue = asyncio.Queue(maxsize=256)
         client.sender = asyncio.create_task(self._sender(client_id,client))
         if not self.test_feed:
-            initial = recorded_history(self.database_path, symbol, timeframe,self._now() if self.manual_test else None)
+            initial = recorded_history(self.database_path, symbol, timeframe,self._now() if self.manual_test else None,
+                                       apply_policy=self.continuous and not self.manual_test)
             client.cursor = initial['watermark']
+            client.daily_cursor = initial.get('daily_watermark',0)
+            client.interval_cursor = initial.get('interval_watermark',0)
             self.clients[client_id].sent = {
                 c['timestamp']: json.dumps([c, s], sort_keys=True)
                 for c, s in zip(initial['candles'], initial['status'])}
@@ -245,14 +250,24 @@ class CandleHub:
                 changes = store.connection.execute('''SELECT revision_id,minute_start FROM candle_revisions
                     WHERE instrument_id=(SELECT instrument_id FROM instruments WHERE symbol=?) AND revision_id>?
                     ORDER BY revision_id LIMIT 513''',(symbol,client.cursor)).fetchall()
-            if not changes:
+                daily_changes = store.connection.execute('''SELECT revision_id,timestamp,session_close FROM daily_revisions
+                    WHERE instrument_id=(SELECT instrument_id FROM instruments WHERE symbol=?) AND revision_id>?
+                    ORDER BY revision_id LIMIT 513''',(symbol,client.daily_cursor)).fetchall() if client.timeframe=='1d' else []
+                interval_changes = store.connection.execute('''SELECT revision_id,timestamp,interval_end FROM interval_revisions
+                    WHERE instrument_id=(SELECT instrument_id FROM instruments WHERE symbol=?) AND interval=? AND revision_id>?
+                    ORDER BY revision_id LIMIT 513''',(symbol,client.timeframe,client.interval_cursor)).fetchall() if client.timeframe in ('5m','15m','1h') else []
+            if not changes and not daily_changes and not interval_changes:
                 continue
-            if len(changes)>512:
-                initial = recorded_history(self.database_path,symbol,client.timeframe)
+            if len(changes)+len(daily_changes)+len(interval_changes)>512:
+                initial = recorded_history(self.database_path,symbol,client.timeframe,apply_policy=self.continuous and not self.manual_test)
                 await self._send_json(client_id,dict(type='history',symbol=symbol,interval=client.timeframe,**initial))
                 client.cursor = initial['watermark']
+                client.daily_cursor = initial.get('daily_watermark',0)
+                client.interval_cursor = initial.get('interval_watermark',0)
                 continue
             groups = set()
+            groups.update((r['timestamp'],r['session_close']) for r in daily_changes)
+            groups.update((r['timestamp'],r['interval_end']) for r in interval_changes)
             for row in changes:
                 start = row['minute_start']
                 bounds = session_bounds(stamp(start)[:10])
@@ -260,13 +275,22 @@ class CandleHub:
                 beginning = bounds[0] if client.timeframe=='1d' else bounds[0]+((start-bounds[0])//(minutes*60))*(minutes*60)
                 groups.add((beginning,min(beginning+minutes*60,bounds[1])))
             for beginning,end in sorted(groups):
-                result = recorded_history(self.database_path,symbol,client.timeframe,now if self.manual_test else None,start=stamp(beginning),before=stamp(end))
+                result = recorded_history(self.database_path,symbol,client.timeframe,now if self.manual_test else None,
+                    start=stamp(beginning),before=stamp(end),apply_policy=self.continuous and not self.manual_test)
                 for candle,completion in zip(result['candles'],result['status']):
                     await self._send_json(client_id,dict(type='candle',symbol=symbol,interval=client.timeframe,
-                        source=source,feed_status=self.feed_status.get(symbol,'connecting'),source_time=source_time,
+                        source=completion.get('price_source',source),feed_status=self.feed_status.get(symbol,'connecting'),source_time=source_time,
                         source_age_seconds=source_age,backend_receipt_time=now.isoformat(),storage=storage,
-                        candle=candle,completion=completion,market=result['market'],watermark=changes[-1]['revision_id']))
-            client.cursor = changes[-1]['revision_id']
+                        candle=candle,completion=completion,market=result['market'],
+                        watermark=changes[-1]['revision_id'] if changes else client.cursor,
+                        daily_watermark=daily_changes[-1]['revision_id'] if daily_changes else client.daily_cursor,
+                        interval_watermark=interval_changes[-1]['revision_id'] if interval_changes else client.interval_cursor))
+            if changes:
+                client.cursor = changes[-1]['revision_id']
+            if daily_changes:
+                client.daily_cursor = daily_changes[-1]['revision_id']
+            if interval_changes:
+                client.interval_cursor = interval_changes[-1]['revision_id']
 
     async def _run_feed(self, symbol: str) -> None:
         if self.test_feed:
@@ -445,8 +469,11 @@ class CandleHub:
         if client is None:
             return
         with MarketRecorder(self.database_path) as recorder:
-            latest_fetch = recorder.connection.execute('''SELECT status, fetched_at, message FROM yahoo_history_fetches
-                WHERE ticker=? ORDER BY fetch_id DESC LIMIT 1''', (client.symbol,)).fetchone()
+            table = 'daily_history_fetches' if client.timeframe=='1d' else 'interval_history_fetches' if client.timeframe in ('5m','15m','1h') else 'yahoo_history_fetches'
+            scope = ' AND interval=?' if table=='interval_history_fetches' else ''
+            latest_fetch = recorder.connection.execute(f'''SELECT status, fetched_at, message FROM {table}
+                WHERE ticker=?{scope} ORDER BY fetch_id DESC LIMIT 1''',
+                (client.symbol,client.timeframe) if scope else (client.symbol,)).fetchone()
         await self._send_json(
             client_id,
             {

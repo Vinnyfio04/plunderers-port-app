@@ -27,6 +27,8 @@ from backend.indicators import (
 from backend.live_candles import CandleHub
 from backend.recorded_history import recorded_history
 from backend.yahoo_history import fetch_recent, persist_download, market_status
+from backend.daily_history import download as download_daily, persist as persist_daily, refresh_needed as daily_refresh_needed, oldest_page_before
+from backend.interval_history import download as download_interval, persist as persist_interval, refresh_needed as interval_refresh_needed, INTERVAL_MINUTES
 from backend.database import database_path, prepare_database, DatabaseOwner
 from backend.write_coordinator import WriteCoordinator
 from backend.market_store import DEFAULT_DATABASE, MarketRecorder
@@ -93,6 +95,37 @@ HISTORY_SYMBOL = "AAPL"
 history_refresh_task = None
 recent_history_tasks = {}
 recent_history_attempts = {}
+daily_history_tasks = {}
+interval_history_tasks = {}
+
+
+def request_interval_history(symbol, interval):
+    key = (symbol,interval)
+    task = interval_history_tasks.get(key)
+    if task and not task.done():
+        return task
+    if not interval_refresh_needed(DATABASE_PATH,symbol,interval):
+        return None
+    async def refresh_interval():
+        result = await asyncio.to_thread(download_interval,DATABASE_PATH,symbol,interval)
+        await writer.run(lambda:persist_interval(DATABASE_PATH,symbol,interval,result))
+    task = asyncio.create_task(refresh_interval())
+    interval_history_tasks[key] = task
+    return task
+
+
+def request_daily_history(symbol=HISTORY_SYMBOL):
+    task = daily_history_tasks.get(symbol)
+    if task and not task.done():
+        return task
+    if not daily_refresh_needed(DATABASE_PATH,symbol):
+        return None
+    async def refresh_daily():
+        result = await asyncio.to_thread(download_daily,symbol)
+        await writer.run(lambda:persist_daily(DATABASE_PATH,symbol,result))
+    task = asyncio.create_task(refresh_daily())
+    daily_history_tasks[symbol] = task
+    return task
 
 
 async def reconcile_recent_history(symbol=HISTORY_SYMBOL):
@@ -102,7 +135,7 @@ async def reconcile_recent_history(symbol=HISTORY_SYMBOL):
             WHERE instrument_id=(SELECT instrument_id FROM instruments WHERE symbol=?)''',(symbol,)).fetchone()[0]
     from datetime import timedelta
     now = datetime.now(timezone.utc)
-    beginning = max(datetime.fromtimestamp(latest,timezone.utc)-timedelta(minutes=5),now-timedelta(days=7)) if latest else None
+    beginning = max(datetime.fromtimestamp(latest,timezone.utc)-timedelta(minutes=5),now-timedelta(days=7)+timedelta(minutes=1)) if latest else None
     result = await asyncio.to_thread(fetch_recent,DATABASE_PATH,symbol,beginning,True)
     if latest and now-datetime.fromtimestamp(latest,timezone.utc)>timedelta(days=7):
         result['message'] = 'Some older minutes may be outside Yahoo minute-history retention; gaps are preserved.'
@@ -133,6 +166,9 @@ async def start_history_refresh():
         while True:
             state = market_status()
             if previous is None or state['status']=='open' or previous=='open' or close_attempts:
+                request_daily_history()
+                for interval in {c.timeframe for c in candle_hub.clients.values()} & set(INTERVAL_MINUTES):
+                    request_interval_history(HISTORY_SYMBOL,interval)
                 await request_recent_history()
                 if previous=='open' and state['status']=='closed':
                     close_attempts = 3
@@ -151,11 +187,12 @@ def history_result(timeframe: Timeframe, as_of: datetime | None = None, limit=20
     if not os.getenv('MARKET_CANDLE_FILE'):
         if candle_hub.manual_test and as_of is None:
             as_of = candle_hub._now()
-        result = recorded_history(DATABASE_PATH, HISTORY_SYMBOL, timeframe, as_of,min(limit,2000),before,start)
+        apply_policy = not candle_hub.manual_test and not candle_hub.test_feed
+        result = recorded_history(DATABASE_PATH, HISTORY_SYMBOL, timeframe, as_of,min(limit,2000),before,start,apply_policy=apply_policy)
         # Indicator/snapshot warm-up is bounded by validated settings, independent of browser paging.
         while len(result['candles'])<limit and result['next_before']:
             cursor = result['next_before']
-            older = recorded_history(DATABASE_PATH,HISTORY_SYMBOL,timeframe,as_of,min(limit-len(result['candles']),2000),cursor,start)
+            older = recorded_history(DATABASE_PATH,HISTORY_SYMBOL,timeframe,as_of,min(limit-len(result['candles']),2000),cursor,start,apply_policy=apply_policy)
             result['candles'] = older['candles']+result['candles']
             result['status'] = older['status']+result['status']
             result['next_before'] = older['next_before']
@@ -608,6 +645,7 @@ async def history(
     before: datetime | None = None,
     start: datetime | None = None,
     recent: bool = False,
+    oldest: bool = False,
 ) -> dict[str, Any]:
     normalized_symbol = symbol.strip().upper()
     if normalized_symbol != HISTORY_SYMBOL:
@@ -626,7 +664,39 @@ async def history(
     for bound in (before,start):
         if bound is not None and bound.tzinfo is None:
             raise HTTPException(status_code=422,detail='History bounds must include a timezone')
-    result = history_result(timeframe, as_of,limit,before.isoformat() if before else None,start.isoformat() if start else None)
+    if oldest and (before is not None or start is not None or as_of is not None):
+        raise HTTPException(status_code=422,detail='oldest cannot be combined with other history bounds')
+    interval_task = None
+    if (timeframe in INTERVAL_MINUTES and recent and as_of is None and LIVE_FEED_ENABLED
+            and not os.getenv('MARKET_CANDLE_FILE') and not candle_hub.test_feed and not candle_hub.manual_test):
+        interval_task = request_interval_history(normalized_symbol,timeframe)
+        with MarketRecorder(DATABASE_PATH) as store:
+            cached = store.connection.execute('''SELECT 1 FROM interval_candles
+                WHERE instrument_id=(SELECT instrument_id FROM instruments WHERE symbol=?) AND interval=? LIMIT 1''',(normalized_symbol,timeframe)).fetchone()
+        if interval_task and not cached:
+            try:
+                await asyncio.wait_for(asyncio.shield(interval_task),timeout=12)
+            except asyncio.TimeoutError:
+                pass
+    daily_task = None
+    if (timeframe=='1d' and recent and as_of is None and LIVE_FEED_ENABLED
+            and not os.getenv('MARKET_CANDLE_FILE') and not candle_hub.test_feed and not candle_hub.manual_test):
+        daily_task = request_daily_history(normalized_symbol)
+        with MarketRecorder(DATABASE_PATH) as store:
+            cached = store.connection.execute('SELECT 1 FROM daily_candles LIMIT 1').fetchone()
+        if daily_task and not cached:
+            try:
+                await asyncio.wait_for(asyncio.shield(daily_task),timeout=12)
+            except asyncio.TimeoutError:
+                pass
+    before_value = before.isoformat() if before else None
+    if oldest:
+        if timeframe=='1d':
+            before_value = oldest_page_before(DATABASE_PATH,normalized_symbol,limit)
+        else:
+            window = recorded_history(DATABASE_PATH,normalized_symbol,timeframe,limit=5000,apply_policy=True)
+            before_value = window['candles'][limit]['timestamp'] if len(window['candles'])>limit else None
+    result = history_result(timeframe, as_of,limit,before_value,start.isoformat() if start else None)
     # Opening a company must not depend on an open exchange or a new WebSocket tick.
     if (recent and as_of is None and before is None and start is None and LIVE_FEED_ENABLED
             and not os.getenv('MARKET_CANDLE_FILE') and not candle_hub.test_feed and not candle_hub.manual_test):
@@ -638,12 +708,14 @@ async def history(
                     await asyncio.wait_for(asyncio.shield(task),timeout=12)
                 except asyncio.TimeoutError:
                     pass
-                result = history_result(timeframe,None,limit)
+                result = history_result(timeframe,None,limit,before_value)
         if not result['candles']:
             result['message'] = 'Recent Yahoo history is unavailable or still loading. Retry to load the last trading session.'
     return {
         "symbol": normalized_symbol,
         "live_feed_enabled": LIVE_FEED_ENABLED or candle_hub.manual_test,
+        "daily_download_pending":bool(daily_task and not daily_task.done()),
+        "interval_download_pending":bool(interval_task and not interval_task.done()),
         **result,
     }
 
@@ -788,6 +860,8 @@ async def stop_candle_hub() -> None:
         except asyncio.CancelledError:
             pass
     await asyncio.gather(*recent_history_tasks.values(),return_exceptions=True)
+    await asyncio.gather(*daily_history_tasks.values(),return_exceptions=True)
+    await asyncio.gather(*interval_history_tasks.values(),return_exceptions=True)
     await candle_hub.close()
     await writer.close()
     indicator_store.close()

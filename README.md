@@ -21,7 +21,7 @@ Live Market Workplace is a lightweight, TradingView-style local application for 
 
 ## Current status
 
-The backend owns the Yahoo collector, session scheduling and SQLite recorder independently of browser tabs. The default store is `backend/data/market.db`; startup migrates the old store safely and serves indexed current candles immediately. Empty stores fetch five days of real Yahoo AAPL minute bars; existing stores reconcile an overlapping recent range in the background. The chart reconnects after backend interruptions, shows dated UTC labels and market-closed/next-open status, and appends actual next-session candles without invented overnight bars. Replay reconstructs saved observations in receipt order. CSV is available only through an explicit labeled `MARKET_CANDLE_FILE` development fixture. The expanded offline browser regression passes, including session reopening, chart capture, indicators and paper accounting. An actual regular-session Yahoo observation has **not yet** been matched through SQLite, WebSocket and the visible chart, so Part 4.1 live-streaming evidence remains pending.
+The backend owns the Yahoo collector, session scheduling and SQLite recorder independently of browser tabs. The default store is `backend/data/market.db`; startup migrates the old store safely and serves indexed current candles immediately. Empty stores fetch seven calendar days of real Yahoo AAPL minute bars; existing stores reconcile an overlapping recent range in the background. The chart reconnects after backend interruptions, shows dated UTC labels and market-closed/next-open status, and appends actual next-session candles without invented overnight bars. Replay reconstructs saved observations in receipt order. CSV is available only through an explicit labeled `MARKET_CANDLE_FILE` development fixture. The expanded offline browser regression passes, including session reopening, chart capture, indicators and paper accounting. An actual regular-session Yahoo observation has **not yet** been matched through SQLite, WebSocket and the visible chart, so Part 4.1 live-streaming evidence remains pending.
 
 ## Prerequisites found on this computer
 
@@ -95,7 +95,7 @@ Supported timeframe values are `1m`, `5m`, `15m`, `1h`, and `1d`. The response i
 timestamp, open, high, low, close, volume
 ```
 
-Each source row is one minute for one instrument, and its timestamp marks the inclusive start of that minute. Larger timeframes are derived from those same one-minute rows on request. Intraday groups are aligned to the XNYS regular-session open, while a daily candle covers one exchange session and uses its UTC open as the timestamp. The calendar supplies holidays, daylight-saving changes, and early closes.
+Each minute row covers one instrument and its timestamp marks the inclusive minute start. Larger timeframes use the minute aggregation for fully covered recent intervals and live forming candles. For older or incomplete coverage, completed Yahoo 5-minute, 15-minute, hourly and daily bars supply their matching resolution; these are labeled provider bars, not reconstructed minute observations. Daily candles use the exchange session's UTC open, with holidays, daylight-saving changes and early closes from the calendar.
 
 Each matching `status` object keeps `available_minutes`, `expected_minutes`, `coverage_complete`, `interval_ended`, and `volume_known` outside the six candle fields. A candle volume of `0` is known zero; `null` means one or more included minutes have unknown volume. Gaps do not split a trading session, but they make coverage incomplete.
 
@@ -257,6 +257,20 @@ timestamp, open, high, low, close, volume
 The message carries `symbol`, `interval`, `source`, `feed_status`, source and receipt times, source age, storage IDs, and separate completion/coverage metadata. Equal candle timestamps update the chart in place; a later timestamp appends a candle. A late update for an older timestamp triggers a sorted chart refresh.
 
 Upstream feed status is independent of the FastAPI WebSocket. The page can therefore show Yahoo as disconnected while its local FastAPI socket remains connected.
+
+The end-to-end paths and evidence boundary are:
+
+```text
+Yahoo WebSocket -> MarketRecorder -> observations/receipts -> candles_1m + revisions
+                -> CandleHub -> /ws/candles -> Vue upsert -> candlestick and volume series
+
+Yahoo HTTP history -> versioned bar cache -> effective candles_1m / interval / daily cache
+                   -> /api/history + WebSocket snapshot -> Vue chart
+```
+
+An upstream exception or disconnect changes `feed_status` and sends a status message without closing the browser-to-FastAPI socket. A failed history download writes an `unavailable` fetch audit, preserves cached SQLite candles, and exposes the safe failure message through `history_fetch`; the chart can therefore remain visible while the upstream source is unavailable.
+
+Evidence must stay labeled. Actual Yahoo HTTP history has been matched across SQLite, `/api/history`, and the visible browser chart. The deterministic `python -m backend.check_recorded_history` check demonstrates observation receipts, candle recomputation, WebSocket delivery, persistence, and an upstream disconnect using **TEST DATA**. The actual Yahoo regular-session WebSocket observation-to-chart match remains pending and is required before Part 4.1 live streaming can be called complete.
 
 ### Replay a recorded session with Yahoo disconnected
 
@@ -505,7 +519,7 @@ The additive `candle_states` table retains emitted OHLCV/completion states, eval
 
 ## Yahoo startup history and volume reconciliation
 
-Use the tested backend and Vue startup commands above. With `MARKET_LIVE_FEED=1`, no `MARKET_CANDLE_FILE` override, and no test feed, FastAPI fetches five days of unadjusted regular-session AAPL minute bars for an empty store. Existing stores fetch from five minutes before the latest saved minute, bounded by Yahoo's recent-history window. Reconciliation runs every 60 seconds during an open session, with bounded final attempts after close and calendar-based waiting until the next open. Existing yfinance and SQLite suffice; no new dependencies or credentials are required. An unavailable download keeps cached history and shows an error notice. With live disabled, startup uses the saved bars without contacting Yahoo.
+Use the tested backend and Vue startup commands above. With `MARKET_LIVE_FEED=1`, no `MARKET_CANDLE_FILE` override, and no test feed, FastAPI fetches seven calendar days of unadjusted regular-session AAPL minute bars for an empty store. Existing stores fetch from five minutes before the latest saved minute, bounded by Yahoo's recent-history window. Reconciliation runs every 60 seconds during an open session, with bounded final attempts after close and calendar-based waiting until the next open. Existing yfinance and SQLite suffice; no new dependencies or credentials are required. An unavailable download keeps cached history and shows an error notice. With live disabled, startup uses the saved bars without contacting Yahoo.
 
 The existing database now also holds `yahoo_minute_bars` and `yahoo_history_fetches`; backend startup initializes them additively. Completed downloaded bars replace the corresponding observed minute, including its volume. Provisional bars may be extended by newer quotes, with volume marked Unknown until reconciliation. Bar volume and tick-derived volume are never added. Versions retain their fetch times; raw quote observations remain separate. The existing recorded-session Replay selects quote observations; imported bars are available through history and its as-of cutoff rather than being fabricated as tick receipts.
 
@@ -522,6 +536,12 @@ This uses a disposable database and labeled TEST DATA for provisional tick overl
 
 ## Continuous chart and market.db
 
+**Daily history:** Daily now requests Yahoo `history(period='max', interval='1d', auto_adjust=False)` and caches all returned completed sessions in SQLite. The range is determined by Yahoo's earliest returned record, not a fixed five-day window or a hardcoded listing date. Scroll left for older pages, or use **Earliest · YYYY-MM-DD** to jump directly to the first available daily candles; **Latest · UTC** returns to the latest window. Pages remain limited to 2,000 candles and the existing browser buffer stays bounded. The first download may show a loading notice; an unavailable request preserves cached data and reports the error. No new API key or dependency is required.
+
+Schema version 3 adds typed `daily_candles`, append-only `daily_revisions` and `daily_history_fetches` in `backend/data/market.db`. Version 4 adds `interval_candles`, `interval_revisions` and `interval_history_fetches` for native intraday backfill. Startup initializes these additively using the central database module. The backend coalesces downloads and preserves fetch availability for as-of requests. Fully covered recent intervals and forming live candles continue to use one-minute aggregation; older or partially covered intervals use reported completed provider bars. Metadata distinguishes source resolution and provider coverage from recorded minute coverage. Volumes are replaced, never added across sources. Original receipts/replay are unchanged. The full offline browser SmokeTest passed after these changes; focused live provider-range and Earliest-navigation checks remain pending.
+
+**Intraday history ranges:** 1 minute uses the most recent 7 calendar days; 5 and 15 minutes use 60 calendar days; hourly uses 730 calendar days (about two years). Daily retains maximum available history. These are source-compatible browsing defaults, not a trading recommendation or a guarantee that Yahoo supplies every bar. All intervals have an **Earliest** control for the first saved record in their range, and **Latest** returns to the current window. Scroll left for intervening pages. Intraday browser memory is capped at 5,000 bars; Daily keeps a 6,000-bar working buffer. The chart's feed panel shows the selected history range. Older stored observations and revisions are preserved for Replay. See [history-windows.md](docs/history-windows.md) for research, source limits and caching rules.
+
 Clicking AAPL in Live / History loads its recent saved sessions even when the market is closed. Company selection requests `/api/history?symbol=AAPL&timeframe=1m&recent=true`: saved candles appear immediately, and a missing cache gets a bounded Yahoo history attempt. Concurrent requests share a download and repeated clicks are throttled. Unavailable Yahoo history preserves cached candles; the UI retries backend failures without requiring a new live tick. Indicators and account panels load independently of the chart. Only AAPL currently has a selectable live/history integration; saved-session buttons remain Replay controls.
 
 Vite's API proxy uses a built-in Node HTTP keep-alive agent. On this installed local FastAPI stack, an upstream `Connection: close` request could reset before the response body was delivered, leaving a blank chart despite saved history. Keep the API proxy agent when changing development configuration; the browser regression checks all 1,950 fixture candles through the frontend URL. No additional package is needed.
@@ -536,7 +556,7 @@ For explicit initialization/migration with the backend stopped, use the tested c
 
 Use the existing Uvicorn and Vue startup commands above, with one Uvicorn worker. The backend owns the AAPL collector even with no browser open. It schedules regular sessions with the exchange calendar, retries disconnects with backoff, performs incremental overlapping history reconciliation, and makes bounded final fetches after close. The local socket reconnects automatically after a backend restart. On a closed market the last real candles stay visible and the next open is shown; no overnight candles are invented. At open the next actual minute appends after the previous session. Source timestamps stay UTC and axis/crosshair labels use `MM/DD/YYYY HH:mm` with a visible UTC label.
 
-`GET /api/history` returns at most 2,000 candles by default, with `limit` (1..2000), timezone-qualified `before` and `start` bounds, a `next_before` cursor and a committed revision watermark. Scroll left to load older pages; the browser retains at most 6,000 candles and evicts later pages while reviewing older history. **Latest · UTC** returns to the current window. Indicator/snapshot warm-up uses a bounded backend context derived from each indicator's validated window, independent of browser scrolling.
+`GET /api/history` returns at most 2,000 candles by default, with `limit` (1..2000), timezone-qualified `before` and `start` bounds, a `next_before` cursor and committed revision watermarks. `oldest=true` selects the first page within the interval's browsing range and cannot be combined with explicit time bounds. Scroll left to load older pages; the browser retains at most 5,000 intraday or 6,000 Daily candles and evicts later pages while reviewing older history. **Latest · UTC** returns to the current window. Indicator/snapshot warm-up uses a bounded backend context derived from each indicator's validated window, independent of browser scrolling.
 
 Current candles use typed `candles_1m` columns with a composite instrument/time primary key. Only affected minutes and baseline-dependent neighbors are recomputed. Revisions/provenance and original receipts remain queryable; larger intervals derive from effective minute rows. `MARKET_DATABASE` continues to select a separate test database. The existing quote-replay workflow remains receipt-ordered and read-only for the recorded source.
 

@@ -100,6 +100,23 @@ export function createCandleChart(container, candles, onInspect, onLoadOlder = (
   let indicatorInstances = []
   let isCapturing = false
 
+  const handleChartWheel = (event) => {
+    if (!event.shiftKey || event.ctrlKey || event.metaKey) return
+    // Capture Shift+wheel before the library interprets it as a zoom gesture.
+    event.preventDefault()
+    event.stopPropagation()
+    if (isCapturing) return
+    const timeScale = chart.timeScale()
+    const range = timeScale.getVisibleLogicalRange()
+    if (!range) return
+    // Some browsers translate Shift+wheel into deltaX; others retain deltaY.
+    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
+    const pixelsPerUnit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? timeScale.width() : 1
+    const offset = delta * pixelsPerUnit / timeScale.options().barSpacing
+    timeScale.setVisibleLogicalRange({ from: range.from + offset, to: range.to + offset })
+  }
+  container.addEventListener('wheel', handleChartWheel, { capture: true, passive: false })
+
   const applyCandleData = (ordered) => {
     candleSeries.setData(
       ordered.map(({ time, open, high, low, close }) => ({
@@ -185,12 +202,13 @@ export function createCandleChart(container, candles, onInspect, onLoadOlder = (
   chart.timeScale().fitContent()
 
   return {
-    setCandles(history) {
-      const visible = chart.timeScale().getVisibleRange()
+    setCandles(history, preserveView = true) {
+      const visible = preserveView ? chart.timeScale().getVisibleRange() : null
       candlesByTime.clear()
       for (const candle of history) candlesByTime.set(toChartTime(candle.timestamp), {...candle,time:toChartTime(candle.timestamp)})
       applyCandleData([...candlesByTime.values()].sort((a,b) => a.time-b.time))
       if (visible) chart.timeScale().setVisibleRange(visible)
+      else if (!preserveView && history.length) chart.timeScale().setVisibleLogicalRange({from:-2,to:Math.min(120,history.length)})
     },
     setIndicators(instances) {
       indicatorInstances = instances
@@ -277,6 +295,7 @@ export function createCandleChart(container, candles, onInspect, onLoadOlder = (
       }
     },
     destroy() {
+      container.removeEventListener('wheel', handleChartWheel, true)
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange)
       chart.unsubscribeCrosshairMove(handleCrosshairMove)
       chart.remove()

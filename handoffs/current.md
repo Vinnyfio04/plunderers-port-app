@@ -1,5 +1,13 @@
 # Current project state
 
+## Latest change — intraday history windows (November 15, prompt 31)
+
+This section supersedes older current-state claims below. On ui-rework, the uncommitted maximum-Daily work is retained and extended to practical native Yahoo intraday backfill: 1m seven calendar days, 5m/15m sixty, 1h 730, Daily maximum available. New backend/interval_history.py adds typed current bars/revisions/fetch audits via additive schema migration 4, per-frame coalesced/incremental downloads, and provider-resolution coverage metadata. Changed candle_store/database, main, recorded_history, live_candles, yahoo_history and Vue main.js. Earliest now serves all intervals, with visible range labels and a 5,000-bar intraday budget. Existing chartAdapter Daily changes remain. README, docs/design-pipeline.md, docs/history-windows.md, docs/verification.md and prompts/31-intraday-history-ranges.md describe sources and behavior.
+
+No tests/builds/import checks/browser/API assertions or model requests were run, per the continuing student instruction. No installs/manifests/lockfiles changed. Source review is complete; actual backfill ranges, migration, provider hourly alignment, Earliest navigation, socket revisions and live reconciliation remain unverified. The earlier server PID/tool session was no longer available during inventory; no new server was started and current service readiness was not checked. Reload the ignored root .env assignment privately if restarting the normal backend; never display it. Review the changes with the student before any commit.
+
+Next task: activate the current source with the documented one-worker backend and Vue startup commands; only when the student permits verification, make a focused comparison of each interval's earliest/latest saved dates and one historical/native versus recent minute-derived candle. Do not launch the full regression or million-row benchmark by default. Prior regular-session end-to-end live evidence remains pending.
+
 **Updated:** November 14, 2026
 
 ## Latest handoff — continuous market and market.db
@@ -191,3 +199,13 @@ The student subsequently authorized privately loading the existing .env key and 
 ## Commit handoff — November 15, 2026
 
 The student authorized committing/pushing all pending changes to ui-rework, without further tests. Commit scope includes continuous market.db migration/storage, backend-owned collection and session scheduling, bounded history and chart updates, closed-market loading/proxy fixes, readiness/reconnect changes, verification scripts, prompts and documentation. The latest reconnect changes remain untested. No tests/builds/provider calls were run for this commit task, and [skip ci] is used to skip the push workflow. Credentials, databases and local evidence stay ignored. See docs/verification.md for the actual live-model success and the full regression's remaining reconnect limitation.
+
+## Latest change — maximum Daily history (November 15, prompt 30)
+
+Daily now has a separate full Yahoo daily-history source/cache (backend/daily_history.py, schema version 3), while complete recent days and the forming live day retain minute aggregation. Added Earliest (actual provider date) navigation, bounded historical pages/indicator context, daily revision socket cursors and cache/loading/failure metadata. Changed README/design notes and saved prompt 30. No dependency changes. New work is uncommitted after 31c3ce7.
+
+Restarted the normal backend with the existing .env key loaded privately; process 20840 reported Application startup complete on 8000. Vue remains on 5173. Daily maximum-history retrieval runs as normal application backfill, not a test. No tests/builds/manual verification or model requests were run, per the student instruction. Actual provider earliest date and the new navigation/reconciliation remain unverified. Review the Daily interval and Earliest control when resuming; do not start tests without the student superseding the restriction.
+
+## Commit review — November 15, prompt 36
+
+The student authorized committing/pushing the pending ui-rework changes, including history caches/migrations, interval navigation, Shift-wheel panning, updated evidence/design instructions, report outline and prompts. Reviewed changes and ignored secrets/runtime artifacts. Remote matched local base 31c3ce7 before committing. No new tests/builds/provider calls; use [skip ci] for this push. Earlier unverified live-range/navigation and regular-session evidence limitations remain. See the final Git result for the resulting commit; never add .env or local databases.

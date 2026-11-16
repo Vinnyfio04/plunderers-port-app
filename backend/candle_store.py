@@ -29,6 +29,10 @@ CREATE TABLE IF NOT EXISTS ingestion_state(instrument_id INTEGER PRIMARY KEY, la
     last_source_ms INTEGER, reconciled_ms INTEGER);
 '''
 
+from backend.daily_history import SCHEMA as DAILY_SCHEMA
+from backend.interval_history import SCHEMA as INTERVAL_SCHEMA
+SCHEMA += DAILY_SCHEMA + INTERVAL_SCHEMA
+
 
 def epoch(value):
     return round(datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()*1000)
@@ -68,6 +72,12 @@ def initialize(c):
                     ON b.bar_id=(SELECT MAX(x.bar_id) FROM yahoo_minute_values x WHERE x.instrument_id=r.instrument_id
                         AND x.minute_start=r.minute_start AND x.known_at_ms<=r.known_at_ms)''')
                 c.execute('INSERT INTO schema_migrations VALUES (2,?)',(datetime.now(timezone.utc).isoformat(),))
+        if not c.execute('SELECT 1 FROM schema_migrations WHERE version=3').fetchone():
+            with c:
+                c.execute('INSERT OR IGNORE INTO schema_migrations VALUES (3,?)',(datetime.now(timezone.utc).isoformat(),))
+        if not c.execute('SELECT 1 FROM schema_migrations WHERE version=4').fetchone():
+            with c:
+                c.execute('INSERT OR IGNORE INTO schema_migrations VALUES (4,?)',(datetime.now(timezone.utc).isoformat(),))
         return
     with c:
         for table, column, sql_type in [('observations','instrument_id','INTEGER'),
@@ -103,6 +113,8 @@ def initialize(c):
         finish_minutes(c, now,commit=False)
         c.execute('INSERT INTO schema_migrations VALUES (1,?)', (now.isoformat(),))
         c.execute('INSERT INTO schema_migrations VALUES (2,?)', (now.isoformat(),))
+        c.execute('INSERT INTO schema_migrations VALUES (3,?)', (now.isoformat(),))
+        c.execute('INSERT INTO schema_migrations VALUES (4,?)', (now.isoformat(),))
 
 
 def ingest_bar(c, bar, refresh=True):

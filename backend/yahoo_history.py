@@ -92,7 +92,7 @@ def fetch_recent(database, symbol='AAPL', start=None, download_only=False):
     initialize(database)
     started = datetime.now(timezone.utc)
     try:
-        query = {'start':start} if start else {'period':'5d'}
+        query = {'start':start} if start else {'start':started-timedelta(days=7)+timedelta(minutes=1)}
         frame = yf.Ticker(symbol).history(**query, interval='1m', prepost=False,
                                          auto_adjust=False, actions=False, timeout=10)
         if frame.empty:
