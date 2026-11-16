@@ -231,3 +231,15 @@ Normal backend restarted as process 29840/session 22589 with the existing key lo
 ## Commit/push handoff — November 15, prompt 42
 
 The student approved committing and pushing all pending ui-rework work, including chart-analysis fixes, interval caching/prefetch/catch-up, hourly recovery, focused tests, report edits and documentation/prompts. Reviewed scope and ignored credential/runtime paths; remote matched base eec27a4 before committing. No additional tests or provider calls for this Git task; [skip ci] prevents new test CI. Earlier recorded passes and pending actual regular-session Yahoo/voice evidence remain authoritative. See the final Git result for the new commit and push status.
+
+## Latest branding — November 15, prompt 43
+
+The application is now named Plunderer's Port. Updated the header (P mark), browser title, FastAPI title, README and design heading; preserved the student's matching report edit. Browser title/header/screenshot verified the visible result. No logic/dependency/data changes or test suite. Normal backend restarted as process 9208/session 56368; Vue remains on 5173. Prompt 43 and verification notes record the change; it is uncommitted for student review. Existing checkout paths and earlier historical evidence retain their original names where appropriate.
+
+## Latest logo — November 15, prompt 44
+
+Replaced the P header badge with the user's original treasure-map image from Downloads/yar.png, copied unchanged to frontend/src/assets/treasure-map.png. Frontend main.js imports it; style.css uses a 38x38 image box with contain sizing and no circular badge background. Browser DOM/screenshot verified that the image loads and is visible next to Plunderer's Port. No dependencies, tests/builds, backend changes or restart. Prior branding/report edits preserved; all current changes remain uncommitted.
+
+## Commit/push handoff — November 15, prompt 45
+
+The student approved committing/pushing all pending branding/logo/report/documentation changes on ui-rework. Reviewed the Plunderer's Port name and original treasure-map image, preserved report edits, and confirmed secrets/local databases stay ignored. Remote matched base f103b0c. No additional tests or provider calls for this Git task; [skip ci] avoids a new push test run. See final Git result for the resulting commit/push. Previous chart/source/voice evidence and limitations remain unchanged.

@@ -1,8 +1,8 @@
-# Live Market Workplace
+# Plunderer's Port
 
 ## Project overview
 
-Live Market Workplace is a lightweight, TradingView-style local application for people who want to observe markets and make more informed trading decisions. It is aimed especially at less-experienced traders. Yahoo Finance supplies the planned live stream, while the local paper account and agentic helper support practice and explanation. The helper is advisory; the user remains responsible for every trading decision. [Part 4.1 assignment instructions and the current gap assessment](docs/assignment_instructions.md) distinguish the live deliverable from the synthetic CSV practice data.
+Plunderer's Port is a lightweight, TradingView-style local application for people who want to observe markets and make more informed trading decisions. It is aimed especially at less-experienced traders. Yahoo Finance supplies the planned live stream, while the local paper account and agentic helper support practice and explanation. The helper is advisory; the user remains responsible for every trading decision. [Part 4.1 assignment instructions and the current gap assessment](docs/assignment_instructions.md) distinguish the live deliverable from the synthetic CSV practice data.
 
 ## Goals
 

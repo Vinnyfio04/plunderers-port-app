@@ -1,6 +1,7 @@
 import { createApp, h, onBeforeUnmount, onMounted, ref } from 'vue'
 import { createCandleChart } from './chartAdapter.js'
 import { createHistoryCache, INITIAL_HISTORY_BARS } from './historyCache.js'
+import brandLogo from './assets/treasure-map.png'
 import './style.css'
 
 const DEFAULT_SYMBOL = 'AAPL'
@@ -1616,8 +1617,8 @@ createApp({
       return h('main', { class: 'market-shell' }, [
         h('header', { class: 'market-header' }, [
           h('div', { class: 'brand-lockup' }, [
-            h('span', { class: 'brand-mark', 'aria-hidden': 'true' }, 'M'),
-            h('span', { class: 'brand-name' }, 'Market Workplace'),
+            h('img', { class: 'brand-mark', src: brandLogo, alt: '', width: 38, height: 38 }),
+            h('span', { class: 'brand-name' }, "Plunderer's Port"),
           ]),
           h('div', { class: 'header-controls' }, [
             h('div', { class: 'toolbar-symbol' }, [

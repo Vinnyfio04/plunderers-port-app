@@ -2,7 +2,7 @@
 
 ## Repository
 
-- The Pirate's Plunderer
+- Plunderer's Port
 
 #### Link to the repository
 
@@ -52,4 +52,4 @@
 
 ## Video
 
-- 
+- https://drive.google.com/file/d/1EifLHqOjfXz98MeBFiSvtEHcqVZpZ7mT/view?usp=sharing

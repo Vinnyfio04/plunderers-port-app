@@ -1,4 +1,4 @@
-# Design pipeline
+# Plunderer's Port design pipeline
 
 ## Nonblocking interval loading — November 15, 2026
 

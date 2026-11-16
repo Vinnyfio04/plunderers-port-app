@@ -54,7 +54,7 @@ paper_account = PaperAccount(
     os.getenv("PAPER_STARTING_CASH", "10000"),
 )
 
-app = FastAPI(title="Live Market Workplace API")
+app = FastAPI(title="Plunderer's Port API")
 writer = WriteCoordinator()
 writer_loop = None
 
