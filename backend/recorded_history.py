@@ -19,6 +19,7 @@ def recorded_history(database, symbol, timeframe, as_of=None, limit=2000, before
     minute_limit = min(20000 if timeframe=='1m' else 10000, limit*multiplier+multiplier)
     with MarketRecorder(database) as recorder:
         c = recorder.connection
+        c.execute('BEGIN')  # Rows and revision cursors must describe one committed snapshot.
         rows = read_minutes(c,symbol,minute_limit,before,start,as_of)
         watermark = c.execute('SELECT COALESCE(MAX(revision_id),0) FROM candle_revisions').fetchone()[0]
         tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}

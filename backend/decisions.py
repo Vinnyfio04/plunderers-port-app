@@ -99,6 +99,26 @@ QUESTIONS = [
     },
 ]
 
+MAX_ANALYSIS_CANDLES = 200
+
+
+def validate_provider_input(request_body: dict[str, Any]) -> None:
+    """Reject oversized JSON evidence locally, before spending a provider call."""
+    def count_values(value, depth=0):
+        if depth > 32:
+            raise ValueError('Analysis settings are too deeply nested; simplify the chart and recapture.')
+        children = value.values() if isinstance(value, dict) else value if isinstance(value, list) else ()
+        return 1 + sum(count_values(child, depth + 1) for child in children)
+
+    for message in request_body.get('input', []):
+        for part in message.get('content', []):
+            if part.get('type') != 'input_json':
+                continue
+            data = part['data']
+            encoded = json.dumps(data, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode('utf-8')
+            if count_values(data) > 10000 or len(encoded) > 256 * 1024:
+                raise ValueError('Chart analysis exceeds the provider evidence limit. Use fewer indicators and recapture up to 200 completed candles.')
+
 REVIEW_QUESTIONS = [{
     "type": "choice",
     "name": "verdict",
@@ -279,10 +299,15 @@ class DecisionStore:
         if timeframe not in SUPPORTED_TIMEFRAMES:
             raise ValueError("Snapshot timeframe is unsupported.")
         normalized_candles = _validate_candles(candles, cutoff)
+        if len(normalized_candles) > MAX_ANALYSIS_CANDLES:
+            raise ValueError('Select at most 200 completed candles for chart analysis; reload and recapture.')
         if context is not None:
             matching = {c['timestamp']: c for c in context['candles']}
             if any(matching.get(c['timestamp']) != c for c in normalized_candles):
                 raise ValueError('Chart candles changed or are unavailable in stored history; reload and recapture the chart.')
+            completed = {s['timestamp'] for s in context['status'] if s['interval_ended']}
+            if any(c['timestamp'] not in completed for c in normalized_candles):
+                raise ValueError('Select a completed candle, then recapture the chart.')
         status = [
             {"timestamp": candle["timestamp"], "interval_ended": True}
             for candle in normalized_candles
@@ -563,6 +588,7 @@ def call_decision_provider(
     api_key: str | None,
     timeout: float = 30,
 ) -> dict[str, Any]:
+    validate_provider_input(request_body)
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"

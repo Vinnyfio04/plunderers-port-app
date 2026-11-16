@@ -18,6 +18,7 @@ from backend.recorded_history import recorded_history
 from backend.yahoo_history import market_status, initialize
 from backend.candle_store import finish_minutes, epoch, stamp, session_bounds, session_for
 import random
+from uuid import uuid4
 
 
 YAHOO_SOURCE = "Yahoo Finance"
@@ -35,6 +36,7 @@ class CandleClient:
     interval_cursor: int = 0
     queue: Any = None
     sender: Any = None
+    history_limit: int = 2000
 
 
 class CandleHub:
@@ -62,6 +64,7 @@ class CandleHub:
         self._next_client_id = 1
         self.clock_task = None
         self.continuous = False
+        self.stream_id = uuid4().hex
         self.writer = None
         self.manual_test = os.getenv('MARKET_MANUAL_TEST_FEED','0')=='1'
         self.latest_metadata = {}
@@ -87,8 +90,23 @@ class CandleHub:
         client = self.clients[client_id]
         client.queue = asyncio.Queue(maxsize=256)
         client.sender = asyncio.create_task(self._sender(client_id,client))
-        if not self.test_feed:
+        query = getattr(websocket,'query_params',{})
+        resumed = False
+        try:
+            client.history_limit = min(2000,max(1,int(query.get('limit','2000'))))
+            cursors = tuple(int(query[name]) for name in ('since','daily_since','interval_since'))
+            if query.get('stream_id')==self.stream_id and min(cursors)>=0:
+                with MarketRecorder(self.database_path) as store:
+                    maxima = tuple(store.connection.execute(f'SELECT COALESCE(MAX(revision_id),0) FROM {table}').fetchone()[0]
+                        for table in ('candle_revisions','daily_revisions','interval_revisions'))
+                resumed = all(value<=maximum for value,maximum in zip(cursors,maxima))
+                if resumed:
+                    client.cursor,client.daily_cursor,client.interval_cursor = cursors
+        except (ValueError,KeyError,TypeError):
+            pass  # Old/invalid clients safely receive a bounded fresh snapshot.
+        if not self.test_feed and not resumed:
             initial = recorded_history(self.database_path, symbol, timeframe,self._now() if self.manual_test else None,
+                                       limit=client.history_limit,
                                        apply_policy=self.continuous and not self.manual_test)
             client.cursor = initial['watermark']
             client.daily_cursor = initial.get('daily_watermark',0)
@@ -97,7 +115,9 @@ class CandleHub:
                 c['timestamp']: json.dumps([c, s], sort_keys=True)
                 for c, s in zip(initial['candles'], initial['status'])}
             await self._send_json(client_id, {'type': 'history', 'symbol': symbol,
-                'interval': timeframe, **initial})
+                'interval': timeframe, 'stream_id':self.stream_id, **initial})
+        if resumed:
+            await self._broadcast_changes(symbol,self._now(),TEST_SOURCE if self.manual_test else YAHOO_SOURCE,None,None,None)
         if not self.test_feed and (self.clock_task is None or self.clock_task.done()):
             self.clock_task = asyncio.create_task(self._clock())
         await self._send_status(
@@ -259,8 +279,8 @@ class CandleHub:
             if not changes and not daily_changes and not interval_changes:
                 continue
             if len(changes)+len(daily_changes)+len(interval_changes)>512:
-                initial = recorded_history(self.database_path,symbol,client.timeframe,apply_policy=self.continuous and not self.manual_test)
-                await self._send_json(client_id,dict(type='history',symbol=symbol,interval=client.timeframe,**initial))
+                initial = recorded_history(self.database_path,symbol,client.timeframe,limit=client.history_limit,apply_policy=self.continuous and not self.manual_test)
+                await self._send_json(client_id,dict(type='history',symbol=symbol,interval=client.timeframe,stream_id=self.stream_id,**initial))
                 client.cursor = initial['watermark']
                 client.daily_cursor = initial.get('daily_watermark',0)
                 client.interval_cursor = initial.get('interval_watermark',0)

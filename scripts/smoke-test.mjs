@@ -7,6 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { inflateSync } from 'node:zlib'
+import { createHash } from 'node:crypto'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const runsRoot = path.join(root, 'backend', 'data', 'smoke-runs')
@@ -16,6 +17,10 @@ const candlesFile = path.join(runDir, 'candles.csv')
 const captures = path.join(runDir, 'captures')
 const chromeProfile = path.join(runDir, 'chrome-profile')
 const execFileAsync = promisify(execFile)
+const decisionsOnly = process.argv.includes('--decisions-only')
+const intervalsOnly = process.argv.includes('--intervals-only')
+const focused = decisionsOnly || intervalsOnly
+const liveModel = decisionsOnly && process.argv.includes('--live-model')
 const started = []
 let chrome
 let browserCdp
@@ -70,6 +75,7 @@ function start(command, args, env, name, cwd = root) {
 
 async function runPython(args) {
   const { stdout } = await execFileAsync(findPython(), args, { cwd: root, maxBuffer: 2_000_000,
+    timeout: focused ? 15000 : 0,
     env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } })
   return stdout.trim()
 }
@@ -120,7 +126,7 @@ function decodePixels(dataUrl) {
   assert.equal(pixels.length, height * (1 + width * channels), 'decoded pixel rows')
   assert.ok(new Set(pixels.subarray(0, Math.min(pixels.length, 20000))).size > 8,
     'chart image has varied decoded pixel data')
-  return { width, height, decodedBytes: pixels.length }
+  return { width, height, decodedBytes: pixels.length, sha256: createHash('sha256').update(png).digest('hex') }
 }
 
 function startProvider() {
@@ -132,6 +138,7 @@ function startProvider() {
     '14:34': ['sell', 'downward', 'accept'],
     '14:35': ['buy', 'upward', 'reject_unsupported_signal'],
     '14:36': ['close', 'downward', 'accept'],
+    '20:59': ['wait', 'downward', 'accept'],
   }
   const server = createServer(async (request, response) => {
     const reply = (status, body, type='application/json') => {
@@ -150,7 +157,11 @@ function startProvider() {
       const pixels = decodePixels(parts.input_image.image_url)
       state.stage = 'decoded PNG'
       const data = parts.input_json.data
+      const count = (v) => 1 + (v && typeof v === 'object' ? Object.values(v).reduce((n,x) => n+count(x),0) : 0)
+      assert.ok(count(data) <= 10000, 'provider JSON stays within 10,000 values')
+      assert.ok(Buffer.byteLength(JSON.stringify(data)) <= 256*1024, 'provider JSON stays within byte limit')
       const snapshot = data.snapshot ?? data
+      assert.ok(snapshot.candles.length <= 200, 'analysis contains at most 200 frozen candles')
       assert.equal(snapshot.symbol, 'AAPL')
       assert.equal(snapshot.cutoff, snapshot.candles.at(-1).timestamp)
       const minute = snapshot.cutoff.slice(11, 16)
@@ -163,7 +174,7 @@ function startProvider() {
         assert.equal(data.analyst_answers.find((item) => item.name === 'action').choice, expected[0])
       }
       requests.push({ minute, reviewer, symbol: snapshot.symbol, cutoff: snapshot.cutoff,
-        snapshot_id: snapshot.snapshot_id, pixels })
+        snapshot_id: snapshot.snapshot_id, candleCount:snapshot.candles.length, pixels })
       if (!reviewer && state.failNextAnalyst) {
         state.failNextAnalyst = false
         reply(503,'Offline provider failure fixture','text/plain')
@@ -203,10 +214,11 @@ class CDP {
     })
     this.socket.addEventListener('message', ({ data }) => {
       const message = JSON.parse(String(data))
-      if (!message.id) return
+      if (!message.id) { this.onEvent?.(message); return }
       const pending = this.pending.get(message.id)
       if (!pending) return
       this.pending.delete(message.id)
+      clearTimeout(pending.timer)
       if (message.error) pending.reject(new Error(message.error.message))
       else pending.resolve(message.result)
     })
@@ -214,7 +226,11 @@ class CDP {
   send(method, params = {}) {
     const id = this.nextId++
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject })
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        reject(new Error(`Browser command timed out: ${method}`))
+      }, 15000)
+      this.pending.set(id, { resolve, reject, timer })
       this.socket.send(JSON.stringify({ id, method, params }))
     })
   }
@@ -319,9 +335,11 @@ async function cleanup() {
 }
 
 async function main() {
-  log(await runPython(['-m', 'backend.check_continuous']))
-  log(await runPython(['-m', 'backend.check_recent_history']))
-  log(await runPython(['-m', 'backend.check_provider_failures']))
+  if (!focused) {
+    log(await runPython(['-m', 'backend.check_continuous']))
+    log(await runPython(['-m', 'backend.check_recent_history']))
+    log(await runPython(['-m', 'backend.check_provider_failures']))
+  }
   assert.ok(existsSync(path.join(root, 'frontend', 'node_modules', 'vite', 'bin', 'vite.js')),
     'Vite is installed from the existing frontend lockfile')
   await fs.mkdir(runDir, { recursive: true })
@@ -332,6 +350,14 @@ async function main() {
     '2026-11-09T14:32:00Z,12,12,8,9,100',
     '',
   ].join('\n'))
+  if (decisionsOnly) {
+    const rows = ['timestamp,open,high,low,close,volume']
+    for (let day=9;day<=13;day++) for (let minute=0;minute<390;minute++) {
+      const timestamp = new Date(Date.UTC(2026,10,day,14,30+minute)).toISOString().replace('.000Z','Z')
+      rows.push(`${timestamp},10,13,8,${minute%2 ? 9 : 12},100`)
+    }
+    await fs.writeFile(candlesFile,rows.join('\n')+'\n')
+  }
   await runPython(['-m', 'backend.smoke_fixture', '--database', database])
   const initial = await state().catch(() => null)
   assert.equal(initial, null, 'account is initialized only by the backend')
@@ -347,6 +373,10 @@ async function main() {
     PAPER_STARTING_CASH: '1000', DECISION_PROVIDER: 'test',
     OPENAI_BASE_URL: `http://127.0.0.1:${providerPort}/v1`, OPENAI_API_KEY: '',
     PYTHONDONTWRITEBYTECODE: '1',
+  }
+  if (liveModel) {
+    assert.ok(process.env.OPENAI_API_KEY,'live model requires a privately loaded OPENAI_API_KEY')
+    Object.assign(backendEnv,{DECISION_PROVIDER:'openai',OPENAI_BASE_URL:'https://api.openai.com/v1',OPENAI_API_KEY:process.env.OPENAI_API_KEY})
   }
   start(findPython(), ['-m', 'uvicorn', 'backend.main:app', '--host', '127.0.0.1',
     '--port', String(backendPort)], backendEnv, 'FastAPI')
@@ -373,6 +403,16 @@ async function main() {
   await pageCdp.send('Runtime.enable')
   await waitText('[data-testid="paper-cash"]', '$1000.00', 30000)
   log('Real Chrome opened the Vue dashboard with a fresh $1,000 account')
+  if (intervalsOnly) {
+    await continuousSessionChecks()
+    log('PASS focused interval loading and live continuity; no model calls, benchmark or automation regression')
+    return
+  }
+  if (decisionsOnly) {
+    await chartAnalysisChecks(providerHarness)
+    log(`PASS focused ${liveModel ? 'LIVE model' : 'offline'} chart analysis; unrelated replay, automation and scale regressions not run`)
+    return
+  }
   if (process.argv.includes('--history-only')) {
     await continuousSessionChecks()
     log('PASS focused company-history browser checks; decision/paper regression not run in this mode')
@@ -500,6 +540,166 @@ async function main() {
   log(`PASS browser=Chrome backend=FastAPI UI=Vue SQLite=isolated provider=stubbed calls=${providerHarness.requests.length}`)
 }
 
+async function chartAnalysisChecks(harness) {
+  await waitFor(async()=>evaluate(`document.querySelectorAll('[aria-label="Inspect candle by UTC timestamp"] option').length===500`),'500 recent bars from 1,950 fixture candles')
+  for (const [name,window] of [['Fast SMA',1],['Slow SMA',2]]) {
+    await waitFor(async()=>evaluate(`[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Add indicator' && !b.disabled)`),'ready indicator controls')
+    await fill('[aria-label="Indicator name"]',name)
+    await fill('[aria-label="Indicator window"]',window)
+    await clickButton('Add indicator')
+    await waitFor(async()=>(await value('.indicator-list'))?.includes(name),`${name} saved`)
+  }
+  await waitFor(async()=>evaluate(`!document.querySelector('[data-testid="ask-about-chart"]').disabled`),'ready chart analysis')
+  const saved = async () => JSON.parse(await runPython(['-c',
+    `import sqlite3,json,sys; c=sqlite3.connect(sys.argv[1]); c.row_factory=sqlite3.Row; print(json.dumps([dict(r) for r in c.execute('SELECT d.decision_id,d.model,d.reviewer_model,d.image_sha256,d.answers_json,d.reviewer_answers_json,d.analyst_error,d.reviewer_error,s.snapshot_json FROM decision_records d JOIN decision_snapshots s USING(snapshot_id) ORDER BY d.rowid')]))`,database]))
+  await clickButton('Ask about chart')
+  if (liveModel) {
+    await waitFor(async()=>value('[data-testid="decision-response"]'),'one live model result',75000)
+    const rows = await saved()
+    assert.equal(rows.length,1,'one live analysis request, without retry')
+    const row=rows[0]
+    assert.equal(row.analyst_error,null,'live analyst request succeeded')
+    assert.equal(row.reviewer_error,null,'reviewer has no transport error')
+    const answers=JSON.parse(row.answers_json)
+    for (const answer of answers) await waitText(`[data-testid="decision-answer-${answer.name}"]`,String(answer.choice))
+    const preview=await evaluate(`document.querySelector('[data-testid="decision-preview"]').src`)
+    assert.equal(decodePixels(preview).sha256,row.image_sha256)
+    assert.equal(JSON.parse(row.snapshot_json).candles.length,200)
+    const account=await state()
+    assert.deepEqual([account.cash,account.shares,account.orders,account.fills],[1000,0,0,0])
+    log(`LIVE model against labeled synthetic candles: ${JSON.stringify({decision:row.decision_id,model:row.model,reviewer_model:row.reviewer_model,answers,review:JSON.parse(row.reviewer_answers_json),python:JSON.parse(row.snapshot_json).python_crossover.signal})}`)
+    log('Live answers match SQLite; decodable preview hash matches saved PNG; account unchanged')
+    return
+  }
+  await waitText('[data-testid="decision-answer-action"]','wait',30000)
+  await waitText('[data-testid="reviewer-verdict"]','accept')
+  await waitText('[data-testid="decision-cutoff"]','2026-11-13T20:59:00Z')
+  assert.equal(harness.requests.length,2,'one call per role')
+  assert.ok(harness.requests.every(r=>r.candleCount===200 && r.cutoff==='2026-11-13T20:59:00Z'))
+  assert.equal(harness.requests[0].snapshot_id,harness.requests[1].snapshot_id)
+  assert.equal(harness.requests[0].pixels.sha256,harness.requests[1].pixels.sha256)
+  const rows = await saved()
+  assert.equal(rows[0].image_sha256,harness.requests[0].pixels.sha256,'SQLite capture hash matches actual decoded provider PNG')
+  const preview = await evaluate(`document.querySelector('[data-testid="decision-preview"]').src`)
+  assert.equal(decodePixels(preview).sha256,rows[0].image_sha256,'visible preview matches saved PNG')
+  const snapshot = JSON.parse(rows[0].snapshot_json)
+  assert.equal(snapshot.candles.length,200)
+  assert.equal(snapshot.python_crossover.signal,'downward')
+  assert.equal(JSON.parse(rows[0].answers_json).find(a=>a.name==='action').choice,'wait')
+  assert.equal(JSON.parse(rows[0].reviewer_answers_json)[0].choice,'accept')
+  log('1,950 source candles → 500 recent bars → 200 frozen candles; decoded PNG/preview/SQLite hashes match; wait/downward/accept displayed')
+
+  harness.state.failNextAnalyst = true
+  await clickButton('Ask about chart')
+  await waitText('[data-testid="decision-eligibility"]','Analyst call failed',30000)
+  assert.equal(harness.requests.length,3,'failed analyst not retried and reviewer skipped')
+  assert.ok((await saved())[1].analyst_error.includes('503'))
+  await clickButton('Ask about chart')
+  await waitText('[data-testid="reviewer-verdict"]','accept',30000)
+  assert.equal(harness.requests.length,5,'manual recovery makes exactly two fresh role calls')
+  log('Provider 503 is visible and saved; a manual retry recovers without automatic retries')
+
+  await evaluate(`window.__chartOriginalFetch=window.fetch; window.fetch=async(...args)=>{
+    const response=await window.__chartOriginalFetch(...args);
+    if(String(args[0]).includes('/api/decision-snapshots')) await new Promise(resolve=>{window.__releaseChartSnapshot=resolve});
+    return response;
+  }`)
+  await clickButton('Ask about chart')
+  await waitFor(async()=>evaluate(`typeof window.__releaseChartSnapshot==='function'`),'delayed snapshot ready')
+  assert.equal(await evaluate(`Boolean(document.querySelector('[data-testid="decision-preview"]'))`),false,'old preview cleared at request start')
+  await fill('[aria-label="Select chart timeframe"]','5m')
+  await evaluate(`window.fetch=window.__chartOriginalFetch; window.__releaseChartSnapshot()`)
+  await waitText('[data-testid="decision-error"]','chart changed',15000)
+  assert.equal(harness.requests.length,5,'changed chart is not sent to provider')
+  const account = await state()
+  assert.deepEqual([account.cash,account.shares,account.orders,account.fills],[1000,0,0,0])
+  assert.equal(harness.state.error,undefined)
+  log('Switch during snapshot rejects stale capture; account remains $1,000 / 0 shares / 0 orders / 0 fills')
+  const captureIsolation = await evaluate(`(async()=>{
+    const {createCandleChart}=await import('/src/chartAdapter.js');
+    const container=document.createElement('div');
+    container.style.cssText='position:fixed;left:-10000px;top:0;width:640px;height:500px';
+    document.body.append(container);
+    const original=[12,13,9].map((close,i)=>({timestamp:'2026-11-13T20:'+String(57+i)+':00Z',open:close,high:close+1,low:close-1,close,volume:100}));
+    const revised=original.map(c=>({...c,open:c.open+100,high:c.high+100,low:c.low+100,close:c.close+100}));
+    const adapter=createCandleChart(container,original,()=>{});
+    try {
+      const baseline=await adapter.captureThrough(original[2].timestamp,[],original);
+      const olderIndicator={name:'TEST older-only SMA',values:[{timestamp:'2026-11-09T14:30:00Z',value:500}]};
+      const bounded=await adapter.captureThrough(original[2].timestamp,[olderIndicator],original);
+      const pending=adapter.captureThrough(original[2].timestamp,[],original);
+      adapter.setCandles(revised);
+      const frozen=await pending;
+      const latest=await adapter.captureThrough(original[2].timestamp,[],revised);
+      return {frozenUnchanged:baseline===frozen,revisionVisibleAfterCapture:latest!==frozen,olderIndicatorsDoNotExtendRange:bounded===baseline};
+    } finally {adapter.destroy();container.remove()}
+  })()`)
+  assert.deepEqual(captureIsolation,{frozenUnchanged:true,revisionVisibleAfterCapture:true,olderIndicatorsDoNotExtendRange:true})
+  log('Concurrent bulk refresh preserves frozen PNG pixels and applies revised prices after capture')
+}
+
+async function intervalLoadingChecks(apiUrl,db,traffic) {
+  await waitFor(async()=>['5m','15m','1h','1d'].every(interval=>traffic.requests.some(r=>{
+    const q=new URL(r.url).searchParams
+    return q.get('timeframe')===interval && q.get('recent')==='false' && traffic.finished.has(r.id)
+  })),'four bounded SQLite prefetches')
+  assert.ok(traffic.requests.every(r=>new URL(r.url).searchParams.get('limit')==='500'))
+  await evaluate(`window.__intervalCanvas=document.querySelector('[data-testid="market-chart"] canvas');
+    window.__intervalFetch=window.fetch;
+    window.fetch=(...args)=>{
+      const q=new URL(args[0],location.href).searchParams;
+      if(String(args[0]).includes('/api/history?') && q.get('recent')==='true' && q.get('timeframe')==='5m')
+        return new Promise(resolve=>{window.__releaseInterval=()=>resolve(window.__intervalFetch(...args))});
+      return window.__intervalFetch(...args);
+    };`)
+  const began=Date.now()
+  await fill('[aria-label="Select chart timeframe"]','5m')
+  await waitText('[data-testid="detail-close"]','100')
+  const cachedMilliseconds=Date.now()-began
+  assert.ok(cachedMilliseconds<1500,`cached switch under 1.5s while HTTP is held: ${cachedMilliseconds}ms`)
+  assert.ok(await evaluate(`Boolean(window.__releaseInterval) && document.querySelectorAll('[aria-label="Inspect candle by UTC timestamp"] option').length===390`))
+  assert.equal(await evaluate(`window.__intervalCanvas===document.querySelector('[data-testid="market-chart"] canvas')`),true,'one chart instance reused')
+  await evaluate(`window.fetch=window.__intervalFetch;window.__releaseInterval()`)
+  await waitExactText('[data-testid="socket-status"]','connected')
+  for (const interval of ['15m','1h','1d','1m']) {
+    await fill('[aria-label="Select chart timeframe"]',interval)
+    await waitText('[data-testid="feed-interval"]',interval)
+    await waitText('[data-testid="detail-close"]','100')
+    await waitExactText('[data-testid="socket-status"]','connected')
+    assert.equal(await evaluate(`window.__intervalCanvas===document.querySelector('[data-testid="market-chart"] canvas')`),true)
+  }
+  assert.equal(traffic.frames.filter(m=>m.type==='history').length,0,'valid HTTP cursors avoid duplicate socket history snapshots')
+  log(`All intervals use bounded prefetch; cached 5m renders in ${cachedMilliseconds}ms with foreground HTTP held; one chart canvas reused; no duplicate socket snapshot`)
+
+  const point=await evaluate(`(()=>{const el=document.querySelector('[data-testid="market-chart"]');el.scrollIntoView({block:'center'});const r=el.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+  await pageCdp.send('Input.dispatchMouseEvent',{type:'mouseWheel',...point,deltaX:0,deltaY:-3000,modifiers:8})
+  await waitFor(async()=>evaluate(`document.querySelectorAll('[aria-label="Inspect candle by UTC timestamp"] option').length===1950`),'older pages remain accessible')
+  assert.ok(traffic.requests.some(r=>new URL(r.url).searchParams.has('before')))
+  for (const [seconds,price,total] of [[5,101,4],[20,103,9]]) {
+    const response=await fetch(`${apiUrl}/api/market-fixture`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      source_time:`2026-11-16T14:30:${String(seconds).padStart(2,'0')}Z`,receipt_time:`2026-11-16T14:30:${String(seconds+1).padStart(2,'0')}Z`,price,volume:total})})
+    assert.equal(response.status,200)
+    await waitText('[data-testid="detail-close"]',String(price))
+  }
+  await fill('[aria-label="Select chart timeframe"]','5m')
+  await waitText('[data-testid="detail-close"]','103')
+  await waitExactText('[data-testid="socket-status"]','connected')
+  await evaluate(`window.__intervalFetch=window.fetch;window.fetch=(...args)=>{
+    const q=new URL(args[0],location.href).searchParams;
+    if(String(args[0]).includes('/api/history?') && q.get('recent')==='true' && q.get('timeframe')==='1m')
+      return new Promise(resolve=>{window.__releaseInterval=()=>resolve(window.__intervalFetch(...args))});
+    return window.__intervalFetch(...args);
+  }`)
+  await fill('[aria-label="Select chart timeframe"]','1m')
+  await waitText('[data-testid="detail-close"]','103')
+  assert.ok(await evaluate(`Boolean(window.__releaseInterval)`),'live value is restored from cache before HTTP')
+  await evaluate(`window.fetch=window.__intervalFetch;window.__releaseInterval()`)
+  await waitExactText('[data-testid="socket-status"]','connected')
+  const record=JSON.parse(await runPython(['-c',`import sqlite3,json,sys; c=sqlite3.connect(sys.argv[1]); r=c.execute('SELECT close,volume FROM candles_1m ORDER BY minute_start DESC LIMIT 1').fetchone(); print(json.dumps(dict(close=r[0],volume=r[1],orders=c.execute('SELECT COUNT(*) FROM paper_orders').fetchone()[0])))`,db]))
+  assert.deepEqual(record,{close:103,volume:null,orders:0})
+  log('Older 1,950 bars remain accessible; live 101→103 update and Unknown opening volume match SQLite, survive switches and create no orders')
+}
+
 async function continuousSessionChecks() {
   const continuousDb = path.join(runDir, 'market.db')
   await runPython(['-m','backend.continuous_fixture','--database',continuousDb])
@@ -524,10 +724,27 @@ async function continuousSessionChecks() {
       }
       return original.call(this,text,...args);
     };`})
+  const intervalTraffic = {requests:[],finished:new Set(),frames:[]}
+  if (intervalsOnly) {
+    await pageCdp.send('Network.enable')
+    pageCdp.onEvent = ({method,params}) => {
+      if (method==='Network.requestWillBeSent' && params.request.url.includes('/api/history?')) {
+        intervalTraffic.requests.push({id:params.requestId,url:params.request.url})
+      }
+      if (method==='Network.loadingFinished') intervalTraffic.finished.add(params.requestId)
+      if (method==='Network.webSocketFrameReceived') {
+        try { intervalTraffic.frames.push(JSON.parse(params.response.payloadData)) } catch {}
+      }
+    }
+  }
   await pageCdp.send('Page.navigate',{url:`http://127.0.0.1:${uiPort}/`})
   await waitText('[data-testid="market-status"]','Market closed')
   await waitText('[data-testid="detail-close"]','100')
   await waitExactText('[data-testid="socket-status"]','connected')
+  if (intervalsOnly) {
+    await intervalLoadingChecks(apiUrl,continuousDb,intervalTraffic)
+    return
+  }
   const fullHistory=await fetch(`http://127.0.0.1:${uiPort}/api/history?symbol=AAPL&timeframe=1m&recent=true`,{signal:AbortSignal.timeout(10000)})
   assert.equal(fullHistory.status,200,'full history passes through Vue proxy')
   assert.equal((await fullHistory.json()).candles.length,1950,'all five saved sessions are available while closed')

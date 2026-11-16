@@ -17,6 +17,11 @@ POLICIES = {
     '1d': dict(lookback_days=None,label='Daily: maximum available history',bar_budget=None),
 }
 INTERVAL_MINUTES = {'5m':5,'15m':15,'1h':60}
+
+
+class IntervalDataError(ValueError):
+    """A safe, actionable explanation for unavailable provider candle data."""
+
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS interval_candles (
     instrument_id INTEGER NOT NULL, interval TEXT NOT NULL, timestamp INTEGER NOT NULL,
@@ -86,10 +91,18 @@ def download(database, symbol, interval):
     if successful and latest and started.timestamp()-successful[0]/1000<86400:
         beginning = max(beginning,datetime.fromtimestamp(latest[0],timezone.utc)-timedelta(minutes=2*INTERVAL_MINUTES[interval]))
     try:
-        frame = yf.Ticker(symbol).history(start=beginning,interval=interval,prepost=False,
-            auto_adjust=False,actions=False,timeout=10).sort_index()
+        ticker = yf.Ticker(symbol)
+        frame = ticker.history(start=beginning,interval=interval,prepost=False,
+            auto_adjust=False,actions=False,timeout=10)
+        if frame.empty and interval=='1h':
+            # Yahoo occasionally returns an empty 1h range near its retention boundary.
+            # One equivalent 60m request also bypasses that cached empty range; never loop.
+            fallback_start = max(beginning,started-timedelta(days=729))
+            frame = ticker.history(start=fallback_start,interval='60m',prepost=False,
+                auto_adjust=False,actions=False,timeout=10)
+        frame = frame.sort_index()
         if frame.empty:
-            raise ValueError('Yahoo returned no interval history')
+            raise IntervalDataError('Yahoo returned no price bars. Try Latest again shortly')
         candles=[]
         step=INTERVAL_MINUTES[interval]*60
         for date,row in frame.iterrows():
@@ -104,13 +117,14 @@ def download(database, symbol, interval):
             volume=None if pd.isna(row.Volume) else float(row.Volume)
             if (not all(math.isfinite(x) and x>0 for x in prices) or prices[1]<max(prices) or prices[2]>min(prices)
                     or (volume is not None and (not math.isfinite(volume) or volume<0 or not volume.is_integer()))):
-                raise ValueError('Invalid Yahoo interval OHLCV')
+                raise IntervalDataError('Yahoo returned invalid candle prices or volume')
             candles.append((timestamp,stamp(bounds[0])[:10],end,*prices,None if volume is None else int(volume),(end-timestamp)//60))
         if not candles:
-            raise ValueError('Yahoo returned no completed regular-session bars')
+            raise IntervalDataError('Yahoo returned no completed regular-session bars')
         return dict(status='ok',message=None,candles=candles,fetched=datetime.now(timezone.utc))
     except Exception as error:
-        return dict(status='unavailable',message=f'Yahoo {interval} history unavailable ({type(error).__name__}); keeping saved candles.',
+        reason = str(error) if isinstance(error,IntervalDataError) else 'The upstream request failed; try Latest again shortly'
+        return dict(status='unavailable',message=f'Yahoo {interval} history unavailable: {reason}. Keeping saved candles.',
                     candles=[],fetched=datetime.now(timezone.utc))
 
 

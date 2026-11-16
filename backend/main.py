@@ -199,18 +199,25 @@ def history_result(timeframe: Timeframe, as_of: datetime | None = None, limit=20
             if not older['candles'] or older['next_before']==cursor:
                 break
         return result
-    return aggregate_timeframe(
+    result = aggregate_timeframe(
         load_minute_records(CANDLE_FILE),
         timeframe=timeframe,
         as_of=as_of,
     )
+    pairs = [(c,s) for c,s in zip(result['candles'],result['status'])
+        if (not before or parse_utc(c['timestamp'])<parse_utc(before))
+        and (not start or parse_utc(c['timestamp'])>=parse_utc(start))]
+    result['next_before'] = pairs[-limit][0]['timestamp'] if len(pairs)>limit else None
+    result['candles'] = [c for c,s in pairs[-limit:]]
+    result['status'] = [s for c,s in pairs[-limit:]]
+    return result
 
 
-def indicator_instances(symbol: str, timeframe: Timeframe, before=None) -> list[dict[str, Any]]:
+def indicator_instances(symbol: str, timeframe: Timeframe, before=None, limit=2000) -> list[dict[str, Any]]:
     configurations = indicator_store.list(symbol,timeframe)
     window = max((item.settings['window'] for item in configurations),default=1)
-    result = history_result(timeframe,limit=min(12000,2000+window),before=before)
-    visible_times = {c['timestamp'] for c in result['candles'][-2000:]}
+    result = history_result(timeframe,limit=min(12000,limit+window),before=before)
+    visible_times = {c['timestamp'] for c in result['candles'][-limit:]}
     instances = [
         instance_with_values(instance, result["candles"], result["status"])
         for instance in configurations
@@ -558,6 +565,7 @@ def list_indicators(
     symbol: str = Query(HISTORY_SYMBOL, min_length=1),
     timeframe: Timeframe = "1m",
     before: datetime | None = None,
+    limit: int = Query(2000,ge=1,le=2000),
 ) -> dict[str, Any]:
     normalized_symbol = symbol.strip().upper()
     if before is not None and before.tzinfo is None:
@@ -567,7 +575,7 @@ def list_indicators(
     return {
         "symbol": normalized_symbol,
         "timeframe": timeframe,
-        "instances": indicator_instances(normalized_symbol, timeframe,before.isoformat() if before else None),
+        "instances": indicator_instances(normalized_symbol, timeframe,before.isoformat() if before else None,limit),
     }
 
 
@@ -670,25 +678,10 @@ async def history(
     if (timeframe in INTERVAL_MINUTES and recent and as_of is None and LIVE_FEED_ENABLED
             and not os.getenv('MARKET_CANDLE_FILE') and not candle_hub.test_feed and not candle_hub.manual_test):
         interval_task = request_interval_history(normalized_symbol,timeframe)
-        with MarketRecorder(DATABASE_PATH) as store:
-            cached = store.connection.execute('''SELECT 1 FROM interval_candles
-                WHERE instrument_id=(SELECT instrument_id FROM instruments WHERE symbol=?) AND interval=? LIMIT 1''',(normalized_symbol,timeframe)).fetchone()
-        if interval_task and not cached:
-            try:
-                await asyncio.wait_for(asyncio.shield(interval_task),timeout=12)
-            except asyncio.TimeoutError:
-                pass
     daily_task = None
     if (timeframe=='1d' and recent and as_of is None and LIVE_FEED_ENABLED
             and not os.getenv('MARKET_CANDLE_FILE') and not candle_hub.test_feed and not candle_hub.manual_test):
         daily_task = request_daily_history(normalized_symbol)
-        with MarketRecorder(DATABASE_PATH) as store:
-            cached = store.connection.execute('SELECT 1 FROM daily_candles LIMIT 1').fetchone()
-        if daily_task and not cached:
-            try:
-                await asyncio.wait_for(asyncio.shield(daily_task),timeout=12)
-            except asyncio.TimeoutError:
-                pass
     before_value = before.isoformat() if before else None
     if oldest:
         if timeframe=='1d':
@@ -696,19 +689,13 @@ async def history(
         else:
             window = recorded_history(DATABASE_PATH,normalized_symbol,timeframe,limit=5000,apply_policy=True)
             before_value = window['candles'][limit]['timestamp'] if len(window['candles'])>limit else None
-    result = history_result(timeframe, as_of,limit,before_value,start.isoformat() if start else None)
+    result = await asyncio.to_thread(history_result,timeframe,as_of,limit,before_value,start.isoformat() if start else None)
     # Opening a company must not depend on an open exchange or a new WebSocket tick.
     if (recent and as_of is None and before is None and start is None and LIVE_FEED_ENABLED
             and not os.getenv('MARKET_CANDLE_FILE') and not candle_hub.test_feed and not candle_hub.manual_test):
         elapsed = asyncio.get_running_loop().time()-recent_history_attempts.get(normalized_symbol,float('-inf'))
         if elapsed >= 60 or (recent_history_tasks.get(normalized_symbol) and not recent_history_tasks[normalized_symbol].done()):
             task = request_recent_history(normalized_symbol)
-            if not result['candles']:
-                try:
-                    await asyncio.wait_for(asyncio.shield(task),timeout=12)
-                except asyncio.TimeoutError:
-                    pass
-                result = history_result(timeframe,None,limit,before_value)
         if not result['candles']:
             result['message'] = 'Recent Yahoo history is unavailable or still loading. Retry to load the last trading session.'
     return {
@@ -716,6 +703,8 @@ async def history(
         "live_feed_enabled": LIVE_FEED_ENABLED or candle_hub.manual_test,
         "daily_download_pending":bool(daily_task and not daily_task.done()),
         "interval_download_pending":bool(interval_task and not interval_task.done()),
+        "minute_download_pending":bool(recent_history_tasks.get(normalized_symbol) and not recent_history_tasks[normalized_symbol].done()),
+        "stream_id":candle_hub.stream_id,
         **result,
     }
 

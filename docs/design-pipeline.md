@@ -1,5 +1,15 @@
 # Design pipeline
 
+## Nonblocking interval loading — November 15, 2026
+
+The selected chart initially reads 500 recent bars from SQLite. Yahoo reconciliation is scheduled separately; no history response waits for a provider download. The typed rows and minute/Daily/native revision cursors are read in one SQLite snapshot, avoiding a change between the returned rows and their cursor. History calculation runs outside the async event loop. Empty caches return explicit loading/pending state while background work proceeds; unavailable providers preserve saved candles.
+
+Vue reuses its chart and restores a recent Live cache entry immediately, with its real source age/session/completion and a refreshing notice. After the first response it serially prefetches the other four intervals with `recent=false`, `limit=500`, so prefetch does not initiate Yahoo backfill. Foreground selections are not queued behind the background worker. Identical reads share a promise; entries retain at most 500 bars, at most ten symbol/interval Live keys, and reject older revision cursors from late HTTP replies. Replay never uses this cache. Prefetch stops on context changes/unmount. Older paging retains its independent 2,000-bar pages and browsing budget. Indicators retain backend warm-up calculations but render only at displayed candle times.
+
+The first HTTP response carries a per-backend `stream_id` and three committed cursors. Vue supplies these when subscribing. A matching backend validates the cursors and sends intervening revisions; it does not resend a complete history window. Large catch-up batches, invalid cursors or a backend restart produce a bounded fresh snapshot. This preserves updates committed between HTTP and WebSocket subscription. WebSocket snapshots/revisions update the recent cache even when a user is browsing older bars. Original source fields, six-field candle shape, session handling, unknown volume, recorder and simulator rules remain intact.
+
+Focused checks and measured fixture behavior are recorded in verification.md. No migration, dependency, additional upstream subscription or hidden chart instance is required.
+
 ## Intraday history windows — November 15, 2026
 
 The current browsing policy is 7 calendar days at 1m, 60 at 5m/15m, 730 at 1h, and maximum available Daily history. See [history-windows.md](history-windows.md) for platform research and Yahoo constraints. This extends the original minute-only history requirement to show older native provider intervals without inventing minute data. Fully covered local minute aggregates still take precedence and forming intervals use the existing observation path.
@@ -33,7 +43,7 @@ Daily HTTP responses expose `daily_earliest`, `daily_latest`, `daily_watermark` 
 
 ## Company selection while the market is closed
 
-Live / History selection requests the recent-history route independently of exchange status. `recent=true` enables an on-demand download when appropriate: initial empty stores wait at most 12 seconds, while populated stores return their indexed cache immediately and reconcile in the background. The startup scheduler and selection route share a per-symbol download task, and rapid selections share/throttle attempts for 60 seconds. Explicit fixture/live-off modes and as-of/cursor reads never initiate this download. Failed downloads preserve the cache and their fetch audit. External waits stay outside the SQLite writer.
+Live / History selection requests the recent-history route independently of exchange status. `recent=true` enables background reconciliation when appropriate; both empty and populated stores return their indexed local result without waiting for Yahoo. The startup scheduler and selection route share a per-symbol download task, and rapid selections share/throttle attempts for 60 seconds. Explicit fixture/live-off modes and as-of/cursor reads never initiate this download. Failed downloads preserve the cache and their fetch audit. External waits stay outside the SQLite writer.
 
 Vue renders candles and connects the market socket before loading indicator/account/automation panels. It retains the last successful symbol/timeframe response during a retry, times out stalled history requests, and retries with bounded backoff. Empty-state text distinguishes loading/unavailable history from exchange closure. The Vite API proxy uses Node's installed HTTP keep-alive agent because `Connection: close` reproduced upstream resets on this machine. The full-size history regression exercises the response through Vue's URL; small fixtures alone had not detected that failure. Replay range controls wait for their saved selection before Start is enabled.
 
@@ -310,6 +320,10 @@ completed 1m candle ---> stable event key ---> paper_pnl_history (append-only)
 Fill rows use the fill price as their valuation price. Completed-candle rows are added only while the position is open. Their stable key includes symbol, timeframe, candle start, and close in cents: unchanged reprocessing is ignored, while a late revision that changes the close creates a new retained valuation. A partial sale removes the proportional weighted cost basis and preserves the remaining average cost. SQLite's unique `(account_id, symbol, event_key)` constraint keeps reprocessing idempotent while retaining all earlier rows.
 
 ## Frozen chart decision flow
+
+Analysis uses at most 200 completed candles ending at the selected cutoff; this is separate from the larger chart browsing buffer. Python keeps the full bounded context needed for indicator warm-up, but only the selected analysis range and its indicator values go into the provider snapshot. Both role payloads are checked locally against the provider JSON evidence limits. This prevents the observed HTTP 400 on a 1,950-candle input.
+
+The adapter renders the snapshot's actual frozen candles rather than rereading mutable chart data after the snapshot request. Quote updates and bulk history refreshes are retained for restoration after PNG export. If the chart was replaced while the snapshot request was pending, analysis stops with a recapture message before calling the provider. Preflight errors use the same visible error path, old preview/result state is cleared on a new request, and client fetches have finite timeouts. The preview remains tied to its original metadata while live updates continue.
 
 ```text
 selected completed candle

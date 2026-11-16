@@ -141,6 +141,7 @@ export function createCandleChart(container, candles, onInspect, onLoadOlder = (
   }
 
   const applyIndicatorData = (instances, cutoffTime = null) => {
+    const visibleTimes = new Set(candleSeries.data().map(point => point.time))
     for (const series of indicatorSeries) chart.removeSeries(series)
     indicatorSeries = instances.map((instance, index) => {
       const series = chart.addSeries(LineSeries, {
@@ -153,7 +154,7 @@ export function createCandleChart(container, candles, onInspect, onLoadOlder = (
       })
       series.setData(
         instance.values
-          .filter((point) => cutoffTime === null || toChartTime(point.timestamp) <= cutoffTime)
+          .filter((point) => visibleTimes.has(toChartTime(point.timestamp)) && (cutoffTime === null || toChartTime(point.timestamp) <= cutoffTime))
           .map((point) =>
             point.value === null
               ? { time: toChartTime(point.timestamp) }
@@ -203,11 +204,13 @@ export function createCandleChart(container, candles, onInspect, onLoadOlder = (
 
   return {
     setCandles(history, preserveView = true) {
-      const visible = preserveView ? chart.timeScale().getVisibleRange() : null
+      const visible = preserveView === true ? chart.timeScale().getVisibleRange() : null
       candlesByTime.clear()
       for (const candle of history) candlesByTime.set(toChartTime(candle.timestamp), {...candle,time:toChartTime(candle.timestamp)})
+      if (isCapturing) return
       applyCandleData([...candlesByTime.values()].sort((a,b) => a.time-b.time))
       if (visible) chart.timeScale().setVisibleRange(visible)
+      else if (preserveView === 'latest') chart.timeScale().fitContent()
       else if (!preserveView && history.length) chart.timeScale().setVisibleLogicalRange({from:-2,to:Math.min(120,history.length)})
     },
     setIndicators(instances) {
@@ -268,10 +271,11 @@ export function createCandleChart(container, candles, onInspect, onLoadOlder = (
             },
       )
     },
-    async captureThrough(cutoffTimestamp, frozenIndicators) {
+    async captureThrough(cutoffTimestamp, frozenIndicators, snapshotCandles) {
       const originalRange = chart.timeScale().getVisibleRange()
       const cutoffTime = toChartTime(cutoffTimestamp)
-      const frozenCandles = [...candlesByTime.values()]
+      const frozenCandles = (snapshotCandles ?? [...candlesByTime.values()])
+        .map((candle) => ({ ...candle, time: toChartTime(candle.timestamp) }))
         .filter((candle) => candle.time <= cutoffTime)
         .sort((left, right) => left.time - right.time)
       if (!frozenCandles.length || frozenCandles.at(-1).time !== cutoffTime) {

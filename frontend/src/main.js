@@ -1,5 +1,6 @@
 import { createApp, h, onBeforeUnmount, onMounted, ref } from 'vue'
 import { createCandleChart } from './chartAdapter.js'
+import { createHistoryCache, INITIAL_HISTORY_BARS } from './historyCache.js'
 import './style.css'
 
 const DEFAULT_SYMBOL = 'AAPL'
@@ -158,7 +159,7 @@ createApp({
     let lastWatermark = 0
     let followingLatest = true
     let indicatorMutationVersion = 0
-    const historyCache = new Map()
+    const historyCache = createHistoryCache()
     let historyRetryTimer = null
     let historyRetryDelay = 2000
 
@@ -236,7 +237,11 @@ createApp({
         candleStatus.map((item) => [item.timestamp, item]),
       )
       selectedCandle.value = history.length ? history[history.length - 1] : null
-      chartAdapter?.destroy()
+      if (chartAdapter) {
+        chartAdapter.setCandles(history,'latest')
+        chartAdapter.setIndicators(indicators.value)
+        return
+      }
       chartAdapter = createCandleChart(
         chartContainer.value,
         history,
@@ -268,29 +273,35 @@ createApp({
     }
 
     const analyzeCandle = async (selected, automated = false) => {
+      if (decisionLoading.value) {
+        if (automated) throw new Error('Another chart analysis is already running.')
+        return
+      }
       decisionError.value = ''
       decisionResult.value = null
-      if (chartContextLoading.value) throw new Error('Chart settings are loading. Wait for the indicator panel, then retry.')
-      if (!selected) {
-        decisionError.value = 'Select a candle before asking about the chart.'
-        throw new Error(decisionError.value)
-      }
-      const selectedStatus = candleStatusByTime.value[selected.timestamp]
-      if (!selectedStatus?.interval_ended) {
-        decisionError.value = 'Select a completed candle, then recapture the chart.'
-        throw new Error(decisionError.value)
-      }
+      decisionSnapshot.value = null
+      decisionImage.value = ''
       decisionLoading.value = true
-      const frozenSymbol = symbol.value
-      const frozenInterval = timeframe.value
-      const frozenCutoff = selected.timestamp
-      const frozenCandles = candles.value
-        .filter((candle) => candle.timestamp <= frozenCutoff)
-        .map((candle) => ({ ...candle }))
       try {
+        if (chartContextLoading.value) throw new Error('Chart settings are loading. Wait for the indicator panel, then retry.')
+        if (!selected) throw new Error('Select a candle before asking about the chart.')
+        if (!candleStatusByTime.value[selected.timestamp]?.interval_ended) {
+          throw new Error('Select a completed candle, then recapture the chart.')
+        }
+        if (!chartAdapter) throw new Error('The chart is unavailable; reload and recapture.')
+        const frozenSymbol = symbol.value
+        const frozenInterval = timeframe.value
+        const frozenCutoff = selected.timestamp
+        const frozenAdapter = chartAdapter
+        const generation = requestGeneration
+        const frozenCandles = candles.value
+          .filter((candle) => candle.timestamp <= frozenCutoff && candleStatusByTime.value[candle.timestamp]?.interval_ended)
+          .slice(-200)
+          .map((candle) => ({ ...candle }))
         const snapshotResponse = await fetch('/api/decision-snapshots', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(15000),
           body: JSON.stringify({
             symbol: frozenSymbol,
             timeframe: frozenInterval,
@@ -302,9 +313,13 @@ createApp({
         if (!snapshotResponse.ok) {
           throw new Error(snapshot.detail || 'Decision snapshot could not be created.')
         }
-        const imageDataUrl = await chartAdapter.captureThrough(
+        if (generation !== requestGeneration || frozenAdapter !== chartAdapter) {
+          throw new Error('The chart changed before capture. Select a completed candle and try again.')
+        }
+        const imageDataUrl = await frozenAdapter.captureThrough(
           frozenCutoff,
           snapshot.indicators,
+          snapshot.candles,
         )
         decisionSnapshot.value = snapshot
         decisionImage.value = imageDataUrl
@@ -312,6 +327,7 @@ createApp({
         const decisionResponse = await fetch('/api/decisions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(75000),
           body: JSON.stringify({
             snapshot_id: snapshot.snapshot_id,
             symbol: frozenSymbol,
@@ -326,10 +342,11 @@ createApp({
         }
         decisionResult.value = decision
         voiceDecisionId.value = decision.decision_id
-        loadSavedDecisions()
+        loadSavedDecisions().catch((failure) => { voiceError.value = failure.message })
         return decision
       } catch (requestError) {
-        decisionError.value = requestError.message
+        decisionError.value = requestError.name === 'TimeoutError'
+          ? 'Chart analysis timed out. Check the backend connection, then try again.' : requestError.message
         if (automated) throw requestError
       } finally {
         decisionLoading.value = false
@@ -597,6 +614,14 @@ createApp({
       const url = new URL(`${protocol}://${window.location.host}/ws/candles`)
       url.searchParams.set('symbol', symbol.value)
       url.searchParams.set('timeframe', timeframe.value)
+      url.searchParams.set('limit',String(INITIAL_HISTORY_BARS))
+      const cached = historyCache.get(symbol.value,timeframe.value)
+      if (cached?.stream_id) {
+        url.searchParams.set('stream_id',cached.stream_id)
+        for (const [name,field] of [['since','watermark'],['daily_since','daily_watermark'],['interval_since','interval_watermark']]) {
+          url.searchParams.set(name,String(cached[field] ?? 0))
+        }
+      }
       const activeSocket = new WebSocket(url)
       socket = activeSocket
       let retryScheduled = false
@@ -630,6 +655,7 @@ createApp({
         if (message.market) marketState.value = message.market
         if (message.history_fetch) historyFetch.value = message.history_fetch
         if (message.type === 'history') {
+          historyCache.put(symbol.value,timeframe.value,message)
           historyEarliest.value = message.history_earliest ?? message.daily_earliest ?? null
           historyPolicy.value = message.history_policy ?? null
           nextBefore = message.next_before
@@ -651,6 +677,7 @@ createApp({
           chartAdapter?.setIndicators(indicators.value)
           return
         }
+        historyCache.update(symbol.value,timeframe.value,message)
         source.value = message.source
         feedStatus.value = message.feed_status
         feedDetail.value = message.detail ?? ''
@@ -697,6 +724,7 @@ createApp({
       const query = new URLSearchParams({
         symbol: symbol.value,
         timeframe: timeframe.value,
+        limit:String(Math.min(2000,Math.max(INITIAL_HISTORY_BARS,candles.value.length))),
       })
       const [typesResponse, instancesResponse] = await Promise.all([
         fetch('/api/indicator-types'),
@@ -887,18 +915,30 @@ createApp({
       sourceAgeBase = null
       sourceAgeMeasuredAt = null
       sourceAgeSeconds.value = null
-      const cacheKey = `${symbol.value}|${nextTimeframe}`
-      const cached = historyCache.get(cacheKey)
+      historyCache.cancelPrefetch()
+      const cached = historyCache.get(symbol.value,nextTimeframe)
+      nextBefore = cached?.next_before ?? null
       historyEarliest.value = cached?.history_earliest ?? cached?.daily_earliest ?? null
       historyPolicy.value = cached?.history_policy ?? null
       completion.value = cached?.status.at(-1) ?? null
+      indicators.value = []
       resetChart(cached?.candles ?? [], cached?.status ?? [])
+      if (cached?.candles.length) {
+        status.value = `${cached.candles.length} cached ${nextTimeframe} candles · refreshing · UTC`
+        source.value = cached.source ?? 'Recorded SQLite history'
+        historyKind.value = cached.data_kind ?? 'recorded'
+        marketState.value = cached.market ?? null
+        historyFetch.value = cached.history_fetch ?? null
+        historyMessage.value = 'Showing cached history while checking the latest saved candles.'
+        if (cached.latest_source_time) {
+          sourceAgeBase = Math.max(0,(Date.now()-Date.parse(cached.latest_source_time))/1000)
+          sourceAgeMeasuredAt = Date.now()
+          sourceAgeSeconds.value = sourceAgeBase
+        }
+      }
 
       try {
-        const query = new URLSearchParams({ symbol: symbol.value, timeframe: nextTimeframe, recent: 'true' })
-        const response = await fetch(`/api/history?${query}`, {signal: AbortSignal.timeout(15000)})
-        if (!response.ok) throw new Error(`History request failed with status ${response.status}`)
-        const historyResponse = await response.json()
+        const historyResponse = await historyCache.load(symbol.value,nextTimeframe)
         if (generation !== requestGeneration) return
         const history = historyResponse.candles
         historyEarliest.value = historyResponse.history_earliest ?? historyResponse.daily_earliest ?? null
@@ -906,7 +946,6 @@ createApp({
         nextBefore = historyResponse.next_before
         lastWatermark = historyResponse.watermark ?? 0
         if (!Array.isArray(history)) throw new Error('Invalid candle history response')
-        historyCache.set(cacheKey,historyResponse)
         historyRetryDelay = 2000
         historyMessage.value = historyResponse.message ?? ''
         historyKind.value = historyResponse.data_kind ?? 'test'
@@ -931,9 +970,10 @@ createApp({
           backendSocketStatus.value = 'disconnected'
           feedStatus.value = 'disabled'
         } else connectCandleStream(generation)
-        if (historyResponse.daily_download_pending || historyResponse.interval_download_pending) {
+        historyCache.prefetch(symbol.value,TIMEFRAMES.map(([value])=>value).filter(value=>value!==nextTimeframe))
+        if (historyResponse.daily_download_pending || historyResponse.interval_download_pending || historyResponse.minute_download_pending) {
           historyMessage.value = `Loading Yahoo ${timeframe.value} history; saved candles remain available.`
-          historyRetryTimer = window.setTimeout(()=>{
+          if (!history.length) historyRetryTimer = window.setTimeout(()=>{
             if (generation===requestGeneration && mode.value==='live') loadDashboard(nextTimeframe)
           },4000)
         }
@@ -981,6 +1021,7 @@ createApp({
     }
 
     const loadReplaySelections = async (preferredSymbol = null) => {
+      historyCache.cancelPrefetch()
       chartContextLoading.value = true
       replaySelectionLoading.value = true
       const generation = ++requestGeneration
@@ -1121,6 +1162,7 @@ createApp({
     })
 
     onBeforeUnmount(() => {
+      historyCache.dispose()
       if (historyRetryTimer !== null) window.clearTimeout(historyRetryTimer)
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
       releaseVoice()
@@ -1445,7 +1487,7 @@ createApp({
             'data-testid': 'ask-about-chart',
           }, decisionLoading.value ? 'Analyzing…' : 'Ask about chart'),
         ]),
-        h('p', 'Freeze a completed chart for advisory analysis. The paper account is managed separately.'),
+        h('p', 'Analyze up to 200 completed candles through the selected cutoff. The frozen preview shows exactly what the agents see. Analysis does not place an order.'),
         h('p', `Paper automation: ${automation.value?.enabled ? 'running' : 'stopped'} · account ${automation.value?.account_id ?? 1} · ${symbol.value} ${timeframe.value}`),
         decisionError.value
           ? h('p', { class: 'error', role: 'alert', 'data-testid': 'decision-error' }, decisionError.value)
