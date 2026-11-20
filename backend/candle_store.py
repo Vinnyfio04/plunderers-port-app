@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS ingestion_state(instrument_id INTEGER PRIMARY KEY, la
 from backend.daily_history import SCHEMA as DAILY_SCHEMA
 from backend.interval_history import SCHEMA as INTERVAL_SCHEMA
 SCHEMA += DAILY_SCHEMA + INTERVAL_SCHEMA
+from backend.backtest_store import SCHEMA as BACKTEST_SCHEMA
+SCHEMA += BACKTEST_SCHEMA
 
 
 def epoch(value):
@@ -78,6 +80,9 @@ def initialize(c):
         if not c.execute('SELECT 1 FROM schema_migrations WHERE version=4').fetchone():
             with c:
                 c.execute('INSERT OR IGNORE INTO schema_migrations VALUES (4,?)',(datetime.now(timezone.utc).isoformat(),))
+        if not c.execute('SELECT 1 FROM schema_migrations WHERE version=5').fetchone():
+            with c:
+                c.execute('INSERT OR IGNORE INTO schema_migrations VALUES (5,?)',(datetime.now(timezone.utc).isoformat(),))
         return
     with c:
         for table, column, sql_type in [('observations','instrument_id','INTEGER'),
@@ -115,6 +120,7 @@ def initialize(c):
         c.execute('INSERT INTO schema_migrations VALUES (2,?)', (now.isoformat(),))
         c.execute('INSERT INTO schema_migrations VALUES (3,?)', (now.isoformat(),))
         c.execute('INSERT INTO schema_migrations VALUES (4,?)', (now.isoformat(),))
+        c.execute('INSERT INTO schema_migrations VALUES (5,?)', (now.isoformat(),))
 
 
 def ingest_bar(c, bar, refresh=True):

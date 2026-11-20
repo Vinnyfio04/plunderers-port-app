@@ -1,15 +1,18 @@
 // One-command, dependency-free browser SmokeTest using installed Chrome and CDP.
 import assert from 'node:assert/strict'
 import { spawn, execFile } from 'node:child_process'
-import { createServer } from 'node:http'
+import { Agent, createServer, request as httpRequest } from 'node:http'
 import { promises as fs, existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { inflateSync } from 'node:zlib'
 import { createHash } from 'node:crypto'
+import { backtestChecks } from './backtest-browser-checks.mjs'
+import { workspaceLayoutChecks } from './workspace-layout-checks.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const evidenceRoot = process.env.SMOKE_EVIDENCE_DIR || path.join(root, 'docs', 'evidence')
 const runsRoot = path.join(root, 'backend', 'data', 'smoke-runs')
 const runDir = path.join(runsRoot, `smoke-${Date.now()}-${process.pid}`)
 const database = path.join(runDir, 'market.sqlite3')
@@ -19,9 +22,17 @@ const chromeProfile = path.join(runDir, 'chrome-profile')
 const execFileAsync = promisify(execFile)
 const decisionsOnly = process.argv.includes('--decisions-only')
 const intervalsOnly = process.argv.includes('--intervals-only')
-const focused = decisionsOnly || intervalsOnly
+const chatOnly = process.argv.includes('--chat-only')
+const chatComparisonOnly = process.argv.includes('--chat-comparison-only')
+const strategyOnly = process.argv.includes('--strategy-only')
+const backtestsOnly = process.argv.includes('--backtests-only')
+const layoutOnly = process.argv.includes('--layout-only')
+const focused = decisionsOnly || intervalsOnly || chatOnly || chatComparisonOnly || strategyOnly || backtestsOnly || layoutOnly
 const liveModel = decisionsOnly && process.argv.includes('--live-model')
 const started = []
+// Preserve the fixture's declared arrival order under concurrent stress sends.
+// A single collector's receipts must not be reordered by a browser HTTP pool.
+const fixtureAgent = new Agent({ keepAlive: true, maxSockets: 1 })
 let chrome
 let browserCdp
 let pageCdp
@@ -182,7 +193,7 @@ function startProvider() {
       }
       const answers = reviewer
         ? [{ type: 'choice', name: 'verdict', choice: expected[2] }]
-        : [{ type: 'choice', name: 'action', choice: expected[0] },
+        : [{ type: 'choice', name: 'action', choice: expected[0], probability: minute === '14:33' ? 0.91 : 0.82 },
            { type: 'choice', name: 'crossover', choice: expected[1] },
            { type: 'choice', name: 'evidence', choice: 'sufficient' }]
       reply(200,JSON.stringify({ model: 'smoke-model', answers }))
@@ -251,7 +262,9 @@ async function value(selector) {
 
 async function fill(selector, text) {
   const found = await evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)});
-    if (!el) return false; el.value = ${JSON.stringify(String(text))};
+    if (!el) return false;
+    for(let parent=el.parentElement;parent;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;
+    el.value = ${JSON.stringify(String(text))};
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true })); return true })()`)
   assert.ok(found, `field ${selector} exists`)
@@ -260,7 +273,9 @@ async function fill(selector, text) {
 async function clickButton(label) {
   const point = await evaluate(`(() => { const el = [...document.querySelectorAll('button')]
     .find((item) => item.textContent.trim() === ${JSON.stringify(label)});
-    if (!el || el.disabled) return null; el.scrollIntoView({ block: 'center' });
+    if (!el || el.disabled) return null;
+    for(let parent=el.parentElement;parent;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;
+    el.scrollIntoView({ block: 'center' });
     const r = el.getBoundingClientRect(); return { x: r.x + r.width/2, y: r.y + r.height/2 }; })()`)
   assert.ok(point, `enabled button ${label} exists`)
   await pageCdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x,
@@ -314,6 +329,7 @@ async function stopChild(record) {
 }
 
 async function cleanup() {
+  fixtureAgent.destroy()
   if (pageCdp) pageCdp.close()
   if (browserCdp) {
     await browserCdp.send('Browser.close').catch(() => {})
@@ -328,7 +344,7 @@ async function cleanup() {
     const relative = path.relative(runsRoot, runDir)
     assert.ok(relative.startsWith('smoke-') && !relative.includes('..') && !path.isAbsolute(relative),
       'temporary cleanup stays inside backend/data/smoke-runs')
-    await fs.rm(runDir, { recursive: true, force: true })
+    await fs.rm(runDir, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })
   } else {
     log(`Failure artifacts retained at ${runDir}`)
   }
@@ -359,6 +375,9 @@ async function main() {
     await fs.writeFile(candlesFile,rows.join('\n')+'\n')
   }
   await runPython(['-m', 'backend.smoke_fixture', '--database', database])
+  if (backtestsOnly || !focused) {
+    await runPython(['-c', `from backend.check_backtests import fixture; from backend.yahoo_history import save_bars; from pathlib import Path; from datetime import timedelta; from backend.check_backtests import START; config,dataset=fixture(); bars=[{k:b[k] for k in ('timestamp','open','high','low','close','volume')} for b in dataset['bars']]; bars.extend(dict(timestamp=(START+timedelta(minutes=i)).isoformat().replace('+00:00','Z'),open=8,high=8,low=8,close=8,volume=100) for i in range(7,57)); save_bars(Path(${JSON.stringify(database)}),'BTST',bars,START+timedelta(days=1))`])
+  }
   const initial = await state().catch(() => null)
   assert.equal(initial, null, 'account is initialized only by the backend')
   const backendPort = await freePort()
@@ -371,6 +390,7 @@ async function main() {
     MARKET_DATABASE: database, MARKET_CANDLE_FILE: candlesFile,
     DECISION_CAPTURE_DIR: captures, MARKET_LIVE_FEED: '0', MARKET_PAPER_FIXTURE: '1',
     PAPER_STARTING_CASH: '1000', DECISION_PROVIDER: 'test',
+    CHAT_PROVIDER: 'test',
     OPENAI_BASE_URL: `http://127.0.0.1:${providerPort}/v1`, OPENAI_API_KEY: '',
     PYTHONDONTWRITEBYTECODE: '1',
   }
@@ -378,8 +398,14 @@ async function main() {
     assert.ok(process.env.OPENAI_API_KEY,'live model requires a privately loaded OPENAI_API_KEY')
     Object.assign(backendEnv,{DECISION_PROVIDER:'openai',OPENAI_BASE_URL:'https://api.openai.com/v1',OPENAI_API_KEY:process.env.OPENAI_API_KEY})
   }
-  start(findPython(), ['-m', 'uvicorn', 'backend.main:app', '--host', '127.0.0.1',
+  const launchBackend = () => start(findPython(), ['-m', 'uvicorn', 'backend.main:app', '--host', '127.0.0.1',
     '--port', String(backendPort)], backendEnv, 'FastAPI')
+  let appBackend = launchBackend()
+  const restartBackend = async () => {
+    await stopChild({ child: appBackend })
+    appBackend = launchBackend()
+    await ready(`http://127.0.0.1:${backendPort}/api/health`, 'Restarted backtest FastAPI')
+  }
   start(process.execPath, [path.join(root, 'frontend', 'node_modules', 'vite', 'bin', 'vite.js'),
     '--host', '127.0.0.1', '--port', String(frontendPort), '--strictPort'],
   { VITE_BACKEND_URL: `http://127.0.0.1:${backendPort}` }, 'Vue/Vite', path.join(root, 'frontend'))
@@ -403,6 +429,14 @@ async function main() {
   await pageCdp.send('Runtime.enable')
   await waitText('[data-testid="paper-cash"]', '$1000.00', 30000)
   log('Real Chrome opened the Vue dashboard with a fresh $1,000 account')
+  if (layoutOnly || !focused) {
+    await workspaceLayoutChecks({ evaluate, pageCdp, fill, clickButton, waitFor, waitText, value, state, evidenceRoot, log, exerciseIndicators: layoutOnly })
+    if (layoutOnly) { log('PASS focused workspace layout and sidebar indicators'); return }
+  }
+  if (backtestsOnly || !focused) {
+    await backtestChecks({ evaluate, fill, clickButton, waitFor, waitText, value, pageCdp, runPython, database, root, evidenceRoot, restartBackend, log })
+    if (backtestsOnly) { log('PASS focused backtest performance workspace'); return }
+  }
   if (intervalsOnly) {
     await continuousSessionChecks()
     log('PASS focused interval loading and live continuity; no model calls, benchmark or automation regression')
@@ -413,12 +447,28 @@ async function main() {
     log(`PASS focused ${liveModel ? 'LIVE model' : 'offline'} chart analysis; unrelated replay, automation and scale regressions not run`)
     return
   }
+  if (chatOnly) {
+    await chatChecks(providerHarness)
+    log('PASS focused SDK chat: rule explanation, unclear-request clarification, stale-response rejection, chart assessment, tool failure, and synchronized chart result')
+    return
+  }
+  if (chatComparisonOnly) {
+    await chatComparisonChecks(providerHarness)
+    log('PASS conversation comparison and New chat isolation through the running interface')
+    return
+  }
+  if (strategyOnly) {
+    await strategyChecks(providerHarness)
+    log('PASS shared Python SMA/crossover: chart, strategy preview and frozen assessment agree; stale response rejected; zero orders')
+    return
+  }
   if (process.argv.includes('--history-only')) {
     await continuousSessionChecks()
     log('PASS focused company-history browser checks; decision/paper regression not run in this mode')
     return
   }
 
+  await evaluate(`window.__fullChartCanvas=document.querySelector('[data-testid="market-chart"] canvas')`)
   await fill('[aria-label="Select dashboard mode"]', 'replay')
   await waitFor(async () => value('[aria-label="Select saved symbol"]'), 'recorded-session selector')
   await waitFor(async()=>evaluate(`Boolean(document.querySelector('[aria-label="Replay start UTC"]')?.value && document.querySelector('[aria-label="Replay end UTC"]')?.value)`),'loaded recorded-session range')
@@ -440,6 +490,7 @@ async function main() {
   await fill('[aria-label="Select dashboard mode"]', 'live')
   await waitText('[data-testid="paper-cash"]', '$1000.00')
   await waitFor(async()=>evaluate(`[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Add indicator' && !b.disabled)`),'ready live indicator panel')
+  assert.ok(await evaluate(`document.querySelector('[data-testid="market-chart"] canvas')===window.__fullChartCanvas`),'full Replay/Live retains original chart canvas')
   await fill('[aria-label="Indicator name"]', 'Fast SMA')
   await fill('[aria-label="Indicator window"]', '1')
   await clickButton('Add indicator')
@@ -538,6 +589,269 @@ async function main() {
   log('Duplicate and post-Stop candles made no extra order or fill')
   await continuousSessionChecks()
   log(`PASS browser=Chrome backend=FastAPI UI=Vue SQLite=isolated provider=stubbed calls=${providerHarness.requests.length}`)
+}
+
+async function strategyChecks(harness) {
+  await evaluate(`window.__signalFetch=window.fetch;window.fetch=async(...args)=>{
+    const response=await window.__signalFetch(...args);
+    if(String(args[0]).includes('/api/strategy-signals') && response.ok){
+      window.__signalBody=JSON.parse(args[1].body);window.__signalResult=await response.clone().json();
+    }
+    return response;
+  }`)
+  await evaluate(`window.__strategyLabels=[]; const draw=CanvasRenderingContext2D.prototype.fillText;
+    CanvasRenderingContext2D.prototype.fillText=function(text,...args){
+      if(String(text).startsWith('SMA '))window.__strategyLabels.push(String(text));
+      return draw.call(this,text,...args)
+    }`)
+  for (const [name,window] of [['Strategy fast',1],['Strategy slow',2],['Unselected SMA',3]]) {
+    await waitFor(async()=>evaluate(`[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Add indicator' && !b.disabled)`),'indicator ready')
+    await fill('[aria-label="Indicator name"]',name)
+    await fill('[aria-label="Indicator window"]',window)
+    await clickButton('Add indicator')
+    await waitFor(async()=>(await value('.indicator-list'))?.includes(name),'indicator saved')
+  }
+  const ids=await evaluate(`Object.fromEntries([...document.querySelector('[aria-label="Fast SMA"]').options].filter(o=>o.value).map(o=>[o.textContent.split(' · ')[0],o.value]))`)
+  await fill('[aria-label="Fast SMA"]',ids['Strategy fast'])
+  await fill('[aria-label="Slow SMA"]',ids['Strategy slow'])
+  await fill('[aria-label="Strategy order size"]','2')
+  await clickButton('Apply strategy preview')
+  await waitText('[data-testid="strategy-pair"]','Strategy fast (1) / Strategy slow (2)')
+  await waitText('[data-testid="strategy-signal"]','crossover downward')
+  await waitText('[data-testid="strategy-action"]','Strategy preview: wait')
+  await waitText('[data-testid="strategy-markers"]','markers: 1')
+  await waitFor(async()=>evaluate(`window.__strategyLabels.includes('SMA downward')`),'painted downward chart marker')
+  await fill('[aria-label="Fast SMA"]',ids['Strategy slow'])
+  await fill('[aria-label="Slow SMA"]',ids['Strategy fast'])
+  await clickButton('Apply strategy preview')
+  await waitText('[data-testid="strategy-error"]','Fast SMA length must be smaller')
+  await waitText('[data-testid="strategy-pair"]','Strategy fast (1) / Strategy slow (2)')
+  await fill('[aria-label="Fast SMA"]',ids['Strategy fast'])
+  await fill('[aria-label="Slow SMA"]',ids['Strategy slow'])
+  await clickButton('Apply strategy preview')
+  await appendCandle(33,13)
+  await clickButton('Latest · UTC')
+  await waitText('[data-testid="detail-close"]','13')
+  await waitText('[data-testid="strategy-signal"]','crossover upward')
+  await waitText('[data-testid="strategy-action"]','buy 2 shares')
+  const agreement=await evaluate(`(async()=>{
+    const request=window.__signalBody;const points=window.__signalResult.points;
+    const listed=await (await fetch('/api/indicators?symbol=AAPL&timeframe=1m')).json();
+    const last=points.at(-1);
+    const response=await fetch('/api/decision-snapshots',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      symbol:'AAPL',timeframe:'1m',cutoff:request.candles.at(-1).timestamp,candles:request.candles,fast_id:request.fast_id,slow_id:request.slow_id
+    })});
+    if(!response.ok)throw new Error(await response.text());
+    const snapshot=await response.json();
+    return {shared:[last.signal,last.fastValue,last.slowValue],
+      chart: [listed.instances.find(i=>i.indicator_id===Number(request.fast_id)).values.at(-1).value,listed.instances.find(i=>i.indicator_id===Number(request.slow_id)).values.at(-1).value],
+      frozen:[snapshot.python_crossover.signal,snapshot.python_crossover.current.fast,snapshot.python_crossover.current.slow],pair:snapshot.sma_pair};
+  })()`)
+  assert.deepEqual(agreement.shared,['upward',13,11])
+  assert.deepEqual(agreement.chart,[13,11])
+  assert.deepEqual(agreement.frozen,agreement.shared,'chart, preview, and frozen assessment share Python math and the explicit 1/2 pair')
+  assert.deepEqual(agreement.pair,{fast_id:Number(ids['Strategy fast']),slow_id:Number(ids['Strategy slow'])})
+  await waitText('[data-testid="strategy-markers"]','markers: 2')
+  await waitFor(async()=>evaluate(`window.__strategyLabels.includes('SMA upward')`),'painted upward chart marker')
+  await fill('[aria-label="Strategy order size"]','1000')
+  await clickButton('Apply strategy preview')
+  await waitText('[data-testid="strategy-action"]','cash does not cover')
+  await fill('[aria-label="Strategy order size"]','2')
+  await clickButton('Apply strategy preview')
+  await waitText('[data-testid="strategy-action"]','buy 2 shares')
+  const evidence=path.join(evidenceRoot,`sma-strategy-step2-${Date.now()}`)
+  await fs.mkdir(evidence,{recursive:true})
+  await evaluate(`document.querySelector('.strategy-panel').scrollIntoView({block:'start'});window.scrollTo(0,0)`)
+  const shot=await pageCdp.send('Page.captureScreenshot',{format:'png'})
+  await fs.writeFile(path.join(evidence,'strategy-preview.png'),Buffer.from(shot.data,'base64'))
+  await evaluate(`window.__lateSignalFetch=window.fetch;window.fetch=async(...args)=>{
+    const response=await window.__lateSignalFetch(...args);
+    if(String(args[0]).includes('/api/strategy-signals'))await new Promise(resolve=>window.__releaseSignal=resolve);
+    return response;
+  }`)
+  await fill('[aria-label="Strategy order size"]','3')
+  await clickButton('Apply strategy preview')
+  await waitFor(async()=>evaluate(`typeof window.__releaseSignal==='function'`),'delayed shared signal response')
+  await fill('[aria-label="Select chart timeframe"]','5m')
+  await evaluate(`window.fetch=window.__lateSignalFetch;window.__releaseSignal()`)
+  await waitText('[data-testid="strategy-pair"]','No valid strategy pair')
+  await waitText('[data-testid="strategy-markers"]','markers: 0')
+  await evaluate(`window.__strategyCanvas=document.querySelector('[data-testid="market-chart"] canvas')`)
+  await fill('[aria-label="Select dashboard mode"]','replay')
+  await waitFor(async()=>evaluate(`Boolean(document.querySelector('[aria-label="Replay start UTC"]')?.value)`),'Replay selection loaded')
+  await fill('[aria-label="Select dashboard mode"]','live')
+  await fill('[aria-label="Select chart timeframe"]','1m')
+  await waitText('[data-testid="strategy-action"]','buy 3 shares')
+  const chartState=await evaluate(`(()=>{const el=document.querySelector('[data-testid="market-chart"]');const r=el.getBoundingClientRect();return {same:el.querySelector('canvas')===window.__strategyCanvas,width:r.width,height:r.height}})()`)
+  assert.equal(chartState.same,true,'Replay/Live preserves the chart canvas DOM')
+  assert.ok(chartState.width>600 && chartState.height>=460 && chartState.height<=760,'chart remains within the layout bounds')
+  const account=await state()
+  assert.deepEqual([account.cash,account.shares,account.orders,account.fills],[1000,0,0,0])
+  assert.equal(harness.requests.length,0,'preview makes no model calls')
+  log(`Shared Python: explicit 1/2 pair ignores third SMA; chart and frozen assessment both return upward/13/11; UI shows buy 2. Invalid reverse pair/cash/stale response guards pass. Arrows painted; no trades. Evidence: ${evidence}`)
+}
+
+async function chatComparisonChecks(harness) {
+  const evidence = path.join(evidenceRoot, `chat-comparison-${Date.now()}`)
+  await fs.mkdir(evidence, {recursive:true})
+  const observations = []
+  const lastText = () => evaluate(`[...document.querySelectorAll('[data-testid="chat-assistant-message"]')].at(-1).textContent`)
+  const lastResult = () => evaluate(`JSON.parse([...document.querySelectorAll('[data-testid="chat-assistant-message"]')].at(-1).querySelector('.chat-tool-record p:last-child code').textContent)`)
+  const screenshot = async (name, target='.chat-panel') => {
+    await evaluate(`document.querySelector('[data-testid="chat-messages"]').scrollTop=100000; document.querySelector(${JSON.stringify(target)}).scrollIntoView({block:'start'})`)
+    await evaluate(`window.scrollTo(0,0)`)
+    const shot = await pageCdp.send('Page.captureScreenshot', {format:'png'})
+    await fs.writeFile(path.join(evidence, `${name}.png`), Buffer.from(shot.data, 'base64'))
+  }
+  const send = async (question, count) => {
+    await fill('[aria-label="Chat message"]', question)
+    await waitFor(async()=>evaluate(`!document.querySelector('[data-testid="chat-send"]').disabled`),'Send ready')
+    await clickButton('Send')
+    await waitFor(async()=>evaluate(`document.querySelectorAll('[data-testid="chat-assistant-message"]').length===${count}`),'assistant response',30000)
+    observations.push({question,text:await lastText(),result:await lastResult()})
+  }
+  for (const [name,window] of [['Fast SMA',1],['Slow SMA',2]]) {
+    await waitFor(async()=>evaluate(`[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Add indicator' && !b.disabled)`),'indicator ready')
+    await fill('[aria-label="Indicator name"]',name)
+    await fill('[aria-label="Indicator window"]',window)
+    await clickButton('Add indicator')
+    await waitFor(async()=>(await value('.indicator-list'))?.includes(name),'indicator saved')
+  }
+  await send('What does WAIT mean in this app?',2)
+  assert.equal(harness.requests.length,0)
+  assert.ok((await lastText()).includes('Wait requires a flat position without an upward crossover'))
+  await screenshot('01-wait-rule')
+
+  await send("Run the decision on the chart I'm looking at. What do you recommend?",3)
+  const first = await lastResult()
+  assert.deepEqual([first.choice,first.probability,first.chart_time,first.data_mode],['wait',0.82,'2026-11-09T14:32:00Z','live'])
+  assert.ok((await lastText()).includes('wait with probability 82%'))
+  await waitText('[data-testid="decision-answer-action"]','wait')
+  await screenshot('02-first-assessment')
+  const firstPreview = await evaluate(`document.querySelector('[data-testid="decision-preview"]').src`)
+
+  await appendCandle(33,13)
+  await clickButton('Latest · UTC')
+  await waitText('[data-testid="detail-close"]','13',30000)
+  const comparisonQuestion='Run a new decision for this chart and compare it with the earlier assessment.'
+  await send(comparisonQuestion,4)
+  const second=await lastResult()
+  assert.deepEqual([second.choice,second.probability,second.chart_time],['buy',0.91,'2026-11-09T14:33:00Z'])
+  assert.equal(second.previous_assessment.snapshot_id,first.snapshot_id)
+  assert.deepEqual(second.previous_assessment.decision,first.decision,'the full earlier tool result is retained')
+  const text=await lastText()
+  for (const expected of [first.chart_time,second.chart_time,'wait with probability 82%','buy with probability 91%']) assert.ok(text.includes(expected),expected)
+  await waitText('[data-testid="decision-answer-action"]','buy')
+  await waitText('[data-testid="decision-cutoff"]',second.chart_time)
+  const preview=await evaluate(`document.querySelector('[data-testid="decision-preview"]').src`)
+  assert.notEqual(preview,firstPreview,'new capture replaces old chart preview')
+  assert.equal(decodePixels(preview).sha256,harness.requests.at(-1).pixels.sha256)
+  await screenshot('03-comparison')
+  await screenshot('03-new-decision-preview','.decision-capture')
+  await evaluate(`[...document.querySelectorAll('[data-testid="chat-assistant-message"]')].at(-1).querySelector('details').open=true`)
+  await screenshot('04-comparison-tool')
+  assert.equal(harness.requests.length,4,'exactly analyst/reviewer for each of two assessments')
+
+  await clickButton('New chat')
+  assert.equal(await evaluate(`document.querySelectorAll('[data-testid="chat-user-message"]').length`),0)
+  await send(comparisonQuestion,2)
+  assert.equal((await lastResult()).previous_assessment,null)
+  assert.ok((await lastText()).includes('No earlier assessment exists for this ticker and data mode in this conversation.'))
+  await screenshot('05-new-chat-no-earlier')
+  const account=await state()
+  assert.deepEqual([account.cash,account.shares,account.orders,account.fills],[1000,0,0,0])
+  await fs.writeFile(path.join(evidence,'observations.json'),JSON.stringify(observations,null,2))
+  log(`Three exact questions in one conversation: rule only; wait/82% at 14:32; buy/91% at 14:33 compared to wait/82% at 14:32; new preview hash matches provider. New chat reports no earlier assessment. Evidence: ${evidence}`)
+}
+
+async function chatChecks(harness) {
+  for (const [name, window] of [['Fast SMA', 1], ['Slow SMA', 2]]) {
+    await waitFor(async () => evaluate(`[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Add indicator' && !b.disabled)`), 'ready indicator controls')
+    await fill('[aria-label="Indicator name"]', name)
+    await fill('[aria-label="Indicator window"]', window)
+    await clickButton('Add indicator')
+    await waitFor(async () => (await value('.indicator-list'))?.includes(name), `${name} saved`)
+  }
+  await waitFor(async () => evaluate(`Boolean(document.querySelector('[aria-label="Chat message"]:not(:disabled)'))`), 'ready assistant chat')
+
+  const assistantCount = () => evaluate(`document.querySelectorAll('[data-testid="chat-assistant-message"]').length`)
+  const lastAssistant = () => evaluate(`[...document.querySelectorAll('[data-testid="chat-assistant-message"]')].at(-1)?.textContent ?? ''`)
+  const lastTools = () => evaluate(`[...document.querySelectorAll('[data-testid="chat-assistant-message"]')].at(-1)?.querySelector('.chat-tool-record')?.textContent ?? ''`)
+  const decisionCount = async () => Number(await runPython(['-c',
+    `import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); print(c.execute('SELECT COUNT(*) FROM decision_records').fetchone()[0])`, database]))
+  const send = async (message, expectedCount) => {
+    await fill('[aria-label="Chat message"]', message)
+    await waitFor(async () => evaluate(`!document.querySelector('[data-testid="chat-send"]').disabled`), 'enabled Send control')
+    await clickButton('Send')
+    await waitFor(async () => (await assistantCount()) === expectedCount, `assistant message ${expectedCount}`, 30000)
+  }
+
+  await send('Explain the decision rules, including when the app waits.', 2)
+  assert.ok((await lastAssistant()).includes('Decision rules:'), 'rule explanation is visible')
+  assert.ok((await lastTools()).includes('explain_decision_rules'), 'rule tool and returned result are expandable')
+  assert.ok(!(await lastTools()).includes('assess_current_chart'), 'rule question does not assess the chart')
+  assert.equal(harness.requests.length, 0, 'rule explanation makes no decision-provider call')
+  assert.equal(await decisionCount(), 0, 'rule explanation creates no assessment record')
+  assert.ok((await lastAssistant()).includes('Ticker AAPL') && (await lastAssistant()).includes('2026-11-09T14:32:00Z'),
+    'captured ticker and chart time accompany the rule response')
+  log('Rule question captured AAPL 14:32, called explain_decision_rules only, returned expandable rules, and created no assessment')
+
+  await send('Should I wait?', 3)
+  assert.ok((await lastAssistant()).includes('Would you like the wait rule explained, or should I assess the captured chart?'))
+  assert.equal(await lastTools(), '', 'unclear request calls no tool')
+  assert.equal(await decisionCount(), 0, 'unclear request creates no assessment')
+  log('Unclear “Should I wait?” request asks the required clarification and calls no tool')
+
+  const beforeStaleMessages = await assistantCount()
+  await evaluate(`window.__chatOriginalFetch=window.fetch; window.fetch=async(...args)=>{
+    const response=await window.__chatOriginalFetch(...args);
+    if(String(args[0]).includes('/api/chat')) await new Promise(resolve=>{window.__releaseChatResponse=resolve});
+    return response;
+  }`)
+  await fill('[aria-label="Chat message"]', 'Assess the chart currently on screen.')
+  await clickButton('Send')
+  await waitFor(async () => evaluate(`typeof window.__releaseChatResponse==='function'`), 'delayed assistant response', 30000)
+  assert.equal(harness.requests.length, 2, 'delayed assessment completed one analyst and one reviewer call')
+  await fill('[aria-label="Select chart timeframe"]', '5m')
+  await evaluate(`window.fetch=window.__chatOriginalFetch; window.__releaseChatResponse()`)
+  await waitText('[data-testid="chat-error"]', 'visible chart changed')
+  assert.equal(await assistantCount(), beforeStaleMessages, 'stale assessment is not shown in chat')
+  assert.equal(await evaluate(`Boolean(document.querySelector('[data-testid="decision-preview"]'))`), false,
+    'stale assessment does not update the chart preview')
+  log('A completed 1m response released after switching to 5m was discarded before chat or chart display')
+
+  await fill('[aria-label="Select chart timeframe"]', '1m')
+  await waitText('[data-testid="detail-close"]', '9')
+  await waitFor(async () => evaluate(`Boolean(document.querySelector('[aria-label="Chat message"]:not(:disabled)'))`), 'chat ready after returning to 1m')
+  await send('Assess the chart currently on screen.', beforeStaleMessages + 1)
+  const assessmentText = await lastAssistant()
+  assert.ok(assessmentText.includes('AAPL at 2026-11-09T14:32:00Z'))
+  assert.ok(assessmentText.includes('wait with probability 82%'))
+  assert.ok((await lastTools()).includes('assess_current_chart') && (await lastTools()).includes('"probability": 0.82'))
+  assert.ok(assessmentText.includes('choice wait') && assessmentText.includes('probability 82%'))
+  await waitText('[data-testid="decision-answer-action"]', 'wait')
+  await waitText('[data-testid="decision-cutoff"]', '2026-11-09T14:32:00Z')
+  const preview = await evaluate(`document.querySelector('[data-testid="decision-preview"]').src`)
+  const latest = JSON.parse(await runPython(['-c',
+    `import sqlite3,json,sys; c=sqlite3.connect(sys.argv[1]); c.row_factory=sqlite3.Row; r=c.execute('SELECT image_sha256,answers_json,snapshot_id FROM decision_records ORDER BY rowid DESC LIMIT 1').fetchone(); print(json.dumps(dict(r)))`, database]))
+  assert.equal(decodePixels(preview).sha256, latest.image_sha256, 'visible captured preview matches the saved tool result')
+  assert.equal(latest.image_sha256, harness.requests.at(-1).pixels.sha256, 'provider, tool record, SQLite, and visible preview use one capture')
+  assert.equal(JSON.parse(latest.answers_json).find((item) => item.name === 'action').probability, 0.82)
+  log('Assessment displayed AAPL / 14:32 / wait / 82%; tool result, provider image, SQLite record, preview, and decision panel agree')
+
+  const callsBeforeFailure = harness.requests.length
+  const previewBeforeFailure = decodePixels(preview).sha256
+  await send('Assess the chart tool failure.', beforeStaleMessages + 2)
+  assert.ok((await lastAssistant()).includes('I could not assess the captured chart'))
+  assert.ok((await lastTools()).includes('assess_current_chart') && (await lastTools()).includes('"status": "error"'))
+  assert.equal(harness.requests.length, callsBeforeFailure, 'tool failure is returned without a provider call')
+  assert.equal(decodePixels(await evaluate(`document.querySelector('[data-testid="decision-preview"]').src`)).sha256,
+    previewBeforeFailure, 'tool failure does not replace the successful chart result')
+  await waitText('[data-testid="decision-answer-action"]', 'wait')
+  const account = await state()
+  assert.deepEqual([account.cash, account.shares, account.orders, account.fills], [1000, 0, 0, 0])
+  assert.equal(harness.state.error, undefined)
+  log('Tool failure is visible in chat/tool trace, leaves the synchronized wait result intact, and performs no trade')
 }
 
 async function chartAnalysisChecks(harness) {
@@ -765,10 +1079,23 @@ async function continuousSessionChecks() {
   await waitText('[data-testid="detail-close"]','100')
   log('Closed-market company selection loaded 1,950 saved candles through Vue proxy, including with indicator requests unavailable')
   const deliver = async (source,receipt,price,volume) => {
-    const r=await fetch(`${apiUrl}/api/market-fixture`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({source_time:source,receipt_time:receipt,price,volume})})
-    assert.ok(r.ok, 'fixture accepted')
-    return r.json()
+    const body=JSON.stringify({source_time:source,receipt_time:receipt,price,volume})
+    return new Promise((resolve,reject)=>{
+      const outgoing=httpRequest(`${apiUrl}/api/market-fixture`,{method:'POST',agent:fixtureAgent,
+        headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body)}},response=>{
+        let text=''
+        response.setEncoding('utf8')
+        response.on('data',chunk=>{text+=chunk})
+        response.on('error',reject)
+        response.on('end',()=>{
+          try { assert.equal(response.statusCode,200,'fixture accepted');resolve(JSON.parse(text)) }
+          catch(error){reject(error)}
+        })
+      })
+      outgoing.on('error',reject)
+      outgoing.setTimeout(20000,()=>outgoing.destroy(new Error('Fixture request timed out')))
+      outgoing.end(body)
+    })
   }
   await deliver('2026-11-16T14:30:05Z','2026-11-16T14:30:06Z',101,4)
   await waitText('[data-testid="market-status"]','Market open')

@@ -5,6 +5,7 @@ import {
   HistogramSeries,
   LineSeries,
   createChart,
+  createSeriesMarkers,
 } from 'lightweight-charts'
 
 const UP_COLOR = '#089981'
@@ -99,6 +100,13 @@ export function createCandleChart(container, candles, onInspect, onLoadOlder = (
   let indicatorSeries = []
   let indicatorInstances = []
   let isCapturing = false
+  let strategyMarkers = []
+  let strategyMarkerKey = '[]'
+  const markerPlugin = createSeriesMarkers(candleSeries, [])
+  const applyStrategyMarkers = () => {
+    const visible = new Set(candleSeries.data().map((point) => point.time))
+    markerPlugin.setMarkers(strategyMarkers.filter((item) => visible.has(item.time)))
+  }
 
   const handleChartWheel = (event) => {
     if (!event.shiftKey || event.ctrlKey || event.metaKey) return
@@ -150,7 +158,8 @@ export function createCandleChart(container, candles, onInspect, onLoadOlder = (
         lineWidth: 2,
         priceLineVisible: false,
         lastValueVisible: true,
-        priceScaleId: 'indicators',
+        // Price-valued SMAs must align with candle prices, not an independent scale.
+        priceScaleId: instance.type === 'sma' ? 'right' : 'indicators',
       })
       series.setData(
         instance.values
@@ -203,12 +212,26 @@ export function createCandleChart(container, candles, onInspect, onLoadOlder = (
   chart.timeScale().fitContent()
 
   return {
+    setStrategyMarkers(markers) {
+      const key = JSON.stringify(markers)
+      if (key === strategyMarkerKey) return
+      strategyMarkerKey = key
+      strategyMarkers = markers.map((item) => ({
+        time: toChartTime(item.timestamp),
+        position: item.signal === 'upward' ? 'belowBar' : 'aboveBar',
+        color: item.signal === 'upward' ? UP_COLOR : DOWN_COLOR,
+        shape: item.signal === 'upward' ? 'arrowUp' : 'arrowDown',
+        text: `SMA ${item.signal}`,
+      }))
+      if (!isCapturing) applyStrategyMarkers()
+    },
     setCandles(history, preserveView = true) {
       const visible = preserveView === true ? chart.timeScale().getVisibleRange() : null
       candlesByTime.clear()
       for (const candle of history) candlesByTime.set(toChartTime(candle.timestamp), {...candle,time:toChartTime(candle.timestamp)})
       if (isCapturing) return
       applyCandleData([...candlesByTime.values()].sort((a,b) => a.time-b.time))
+      applyStrategyMarkers()
       if (visible) chart.timeScale().setVisibleRange(visible)
       else if (preserveView === 'latest') chart.timeScale().fitContent()
       else if (!preserveView && history.length) chart.timeScale().setVisibleLogicalRange({from:-2,to:Math.min(120,history.length)})
@@ -283,6 +306,8 @@ export function createCandleChart(container, candles, onInspect, onLoadOlder = (
       }
       isCapturing = true
       try {
+        // This preview pair is independent of the existing reviewed-analysis pair.
+        markerPlugin.setMarkers([])
         applyCandleData(frozenCandles)
         applyIndicatorData(frozenIndicators, cutoffTime)
         chart.timeScale().fitContent()
@@ -295,6 +320,7 @@ export function createCandleChart(container, candles, onInspect, onLoadOlder = (
         )
         applyCandleData(currentCandles)
         applyIndicatorData(indicatorInstances)
+        applyStrategyMarkers()
         if (originalRange) chart.timeScale().setVisibleRange(originalRange)
       }
     },

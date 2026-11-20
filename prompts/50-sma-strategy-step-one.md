@@ -1,0 +1,7 @@
+# Approved staged implementation — step 1 only
+
+The student supplied the next-stage outcome: display two different-length SMAs and their crossover, simulate/account for crossover trading, and backtest with point-in-time decisions. Verify against a trusted reference, compare batch/incremental calculations, handle unfinished candles, test accounting, retain browser tests and GitHub Actions on pushes.
+
+After reviewing the project, proposed seven steps: (1) define/select the SMA strategy, (2) unify/reference-check/incrementally calculate indicators, (3) isolate/reuse accounting, (4) implement reproducible backtests, (5) present performance, (6) verify browser/CI, (7) document/handoff. Student authorized: "Execute the plan one step at a time. Do not move on to the next step until it is approved."
+
+This task implements step 1 only: choose two existing saved SMA instances with fast length less than slow length, set positive whole-share entry size, paint crossover signals, and preview a long-only action (upward while flat buys; downward while holding closes all; otherwise hold/wait; cash must cover size; no additional buying while holding). No order submission or automatic execution. Retain the reviewed-analysis path independently until later shared-engine work is approved. Verify this UI using disposable fixtures and existing browser harness, record results, then stop for approval before step 2.

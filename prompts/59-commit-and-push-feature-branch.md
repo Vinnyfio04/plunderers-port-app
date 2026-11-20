@@ -1,0 +1,3 @@
+# Commit and push the completed feature work
+
+Student: “Commit and push all changes to the feature branch.” This explicitly approves committing the completed, previously shown changes, including the student's existing report edit, on workplace-chatbot. Inspect status/diff/remote, exclude ignored credentials/runtime data, scan proposed contents, commit without a CI-skip flag, push the feature branch and verify its remote hash/tracking/clean worktree. Preserve the main/ui-rework branches and all production data. Record preflight checks; report actual commit/push results in the final response. No new feature or dependency work.

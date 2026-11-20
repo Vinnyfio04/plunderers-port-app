@@ -5,6 +5,12 @@ from pathlib import Path
 import sqlite3
 from threading import RLock
 from typing import Any, Callable
+from collections import OrderedDict
+from backend.sma_engine import IncrementalSMA
+
+
+_sma_cache = OrderedDict()
+_sma_cache_lock = RLock()
 
 
 INDICATOR_SCHEMA = """
@@ -32,7 +38,7 @@ class IndicatorDefinition:
     description: str
     inputs: tuple[dict[str, str], ...]
     units: str
-    calculate_window: Callable[[list[dict[str, Any]]], float]
+    calculate_window: Callable[[list[dict[str, Any]]], float] | None
 
     def public_contract(self) -> dict[str, Any]:
         return {
@@ -55,10 +61,6 @@ class IndicatorDefinition:
         }
 
 
-def _sma(window: list[dict[str, Any]]) -> float:
-    return sum(float(candle["close"]) for candle in window) / len(window)
-
-
 def _price_range(window: list[dict[str, Any]]) -> float:
     highest_high = max(float(candle["high"]) for candle in window)
     lowest_low = min(float(candle["low"]) for candle in window)
@@ -69,10 +71,10 @@ INDICATOR_TYPES: dict[str, IndicatorDefinition] = {
     "sma": IndicatorDefinition(
         key="sma",
         label="Simple moving average",
-        description="Arithmetic mean of close prices over N completed candles.",
+        description="Arithmetic mean of close prices over N completed, fully covered candles; unfinished or partial candles produce a gap.",
         inputs=({"field": "close", "units": "price"},),
         units="price",
-        calculate_window=_sma,
+        calculate_window=None,  # Shared IncrementalSMA dispatch below.
     ),
     "price_range": IndicatorDefinition(
         key="price_range",
@@ -140,9 +142,20 @@ def calculate_indicator(
     settings: dict[str, Any],
     candles: list[dict[str, Any]],
     status: list[dict[str, Any]],
+    cache_key=None,
 ) -> list[dict[str, Any]]:
     normalized_type = str(indicator_type).strip().lower()
     _, validated = validate_indicator(normalized_type, "calculation", settings)
+    if normalized_type == 'sma':
+        if cache_key is None:
+            return IncrementalSMA(validated['window']).sync(candles, status)
+        key = (*cache_key, validated['window'])
+        with _sma_cache_lock:
+            engine = _sma_cache.setdefault(key, IncrementalSMA(validated['window']))
+            _sma_cache.move_to_end(key)
+            while len(_sma_cache) > 32:
+                _sma_cache.popitem(last=False)
+            return engine.sync(candles, status)
     definition = INDICATOR_TYPES[normalized_type]
     status_by_time = {item["timestamp"]: item for item in status}
     completed: list[dict[str, Any]] = []
@@ -296,5 +309,6 @@ def instance_with_values(
             instance.settings,
             candles,
             status,
+            cache_key=(instance.symbol, instance.timeframe, instance.indicator_id),
         ),
     }

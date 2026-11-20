@@ -1,0 +1,3 @@
+# Approved step 2: shared SMA/crossover math and independent verification
+
+Student approved the next stage with "Next step" after step 1 was reported complete. Implement only step 2 of the staged plan: one shared SMA and crossover calculation path for chart indicators and the selected strategy/assessment; independently verify against a trusted reference; compare batch and incremental results; explain/test warm-up, unfinished candles, partial data and corrections. Do not begin accounting refactors, backtesting, performance UI or CI changes without the next approval. Preserve all earlier uncommitted student/project work and use the installed environment. Record checks/failures and show results before stopping for step 3 approval.

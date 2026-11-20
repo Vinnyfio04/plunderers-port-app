@@ -1,0 +1,155 @@
+{
+  "mode": "all",
+  "label": "Offline checks with constructed market/model fixtures",
+  "node": "v25.7.0",
+  "python": "C:\\Users\\Owner\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+  "started_at": "2026-11-19T16:27:13.068Z",
+  "steps": [
+    {
+      "name": "package-integrity",
+      "command": "C:\\Users\\Owner\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+      "args": [
+        "-m",
+        "pip",
+        "check"
+      ],
+      "status": "passed",
+      "exit_code": 0,
+      "timeout": false,
+      "error": null,
+      "elapsed_ms": 2380
+    },
+    {
+      "name": "sma-reference",
+      "command": "C:\\Users\\Owner\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+      "args": [
+        "-m",
+        "backend.check_sma_engine"
+      ],
+      "status": "passed",
+      "exit_code": 0,
+      "timeout": false,
+      "error": null,
+      "elapsed_ms": 5082
+    },
+    {
+      "name": "accounting",
+      "command": "C:\\Users\\Owner\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+      "args": [
+        "-m",
+        "backend.check_accounting"
+      ],
+      "status": "passed",
+      "exit_code": 0,
+      "timeout": false,
+      "error": null,
+      "elapsed_ms": 5324
+    },
+    {
+      "name": "backtests",
+      "command": "C:\\Users\\Owner\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+      "args": [
+        "-m",
+        "backend.check_backtests"
+      ],
+      "status": "passed",
+      "exit_code": 0,
+      "timeout": false,
+      "error": null,
+      "elapsed_ms": 10869
+    },
+    {
+      "name": "chat-memory",
+      "command": "C:\\Users\\Owner\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+      "args": [
+        "-m",
+        "backend.check_chat_memory"
+      ],
+      "status": "passed",
+      "exit_code": 0,
+      "timeout": false,
+      "error": null,
+      "elapsed_ms": 7694
+    },
+    {
+      "name": "frontend-policy",
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": [
+        "--test",
+        "scripts/check-sma-strategy.mjs"
+      ],
+      "status": "passed",
+      "exit_code": 0,
+      "timeout": false,
+      "error": null,
+      "elapsed_ms": 699
+    },
+    {
+      "name": "frontend-build",
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": [
+        "C:\\Users\\Owner\\Desktop\\School Work\\5 Fall 2026\\IST 402 - Vibe Coding\\live-market-workplace\\frontend\\node_modules\\vite\\bin\\vite.js",
+        "build"
+      ],
+      "status": "passed",
+      "exit_code": 0,
+      "timeout": false,
+      "error": null,
+      "elapsed_ms": 2104
+    },
+    {
+      "name": "browser-full",
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": [
+        "scripts/smoke-test.mjs"
+      ],
+      "status": "passed",
+      "exit_code": 0,
+      "timeout": false,
+      "error": null,
+      "elapsed_ms": 270932
+    },
+    {
+      "name": "browser-strategy",
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": [
+        "scripts/smoke-test.mjs",
+        "--strategy-only"
+      ],
+      "status": "passed",
+      "exit_code": 0,
+      "timeout": false,
+      "error": null,
+      "elapsed_ms": 32877
+    },
+    {
+      "name": "browser-chat",
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": [
+        "scripts/smoke-test.mjs",
+        "--chat-only"
+      ],
+      "status": "passed",
+      "exit_code": 0,
+      "timeout": false,
+      "error": null,
+      "elapsed_ms": 45858
+    },
+    {
+      "name": "browser-comparison",
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": [
+        "scripts/smoke-test.mjs",
+        "--chat-comparison-only"
+      ],
+      "status": "passed",
+      "exit_code": 0,
+      "timeout": false,
+      "error": null,
+      "elapsed_ms": 35546
+    }
+  ],
+  "completed_at": "2026-11-19T16:34:12.445Z",
+  "status": "passed",
+  "unrun": []
+}

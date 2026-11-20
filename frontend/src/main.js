@@ -1,6 +1,8 @@
-import { createApp, h, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, createApp, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { evaluateSmaStrategy } from './smaStrategy.js'
 import { createCandleChart } from './chartAdapter.js'
 import { createHistoryCache, INITIAL_HISTORY_BARS } from './historyCache.js'
+import BacktestPanel from './BacktestPanel.js'
 import brandLogo from './assets/treasure-map.png'
 import './style.css'
 
@@ -113,6 +115,13 @@ createApp({
     const indicatorNotice = ref('')
     const chartContextLoading = ref(true)
     const indicatorWindowDraft = ref({})
+    const strategyDraft = ref({ fastId: '', slowId: '', quantity: '1' })
+    const strategyConfig = ref(null)
+    const strategyError = ref('')
+    const strategySignals = ref(null)
+    let strategyTimer = null
+    let strategyAbort = null
+    let strategyGeneration = 0
     const paperAccount = ref(null)
     const paperQuantity = ref('1')
     const paperRequestId = ref(newRequestId())
@@ -125,6 +134,16 @@ createApp({
     const decisionImage = ref('')
     const decisionError = ref('')
     const decisionLoading = ref(false)
+    const chatInput = ref('')
+    const chatConversationId = ref(crypto.randomUUID())
+    const chatMessages = ref([{
+      id: 'chat-welcome',
+      role: 'assistant',
+      text: 'Ask me to explain the decision rules or assess the chart currently on screen.',
+      tools: [],
+    }])
+    const chatError = ref('')
+    const chatLoading = ref(false)
     const savedDecisions = ref([])
     const voiceDecisionId = ref('')
     const voiceStatus = ref('Idle')
@@ -163,6 +182,56 @@ createApp({
     const historyCache = createHistoryCache()
     let historyRetryTimer = null
     let historyRetryDelay = 2000
+    let chatGeneration = 0
+
+    const strategyContext = () => `${mode.value}|${symbol.value}|${timeframe.value}`
+    const strategyPreview = computed(() => evaluateSmaStrategy({
+      config: strategyConfig.value?.context === strategyContext() ? strategyConfig.value : null,
+      instances: indicators.value, candles: candles.value, status: candleStatusByTime.value,
+      signals: strategySignals.value,
+      cutoff: selectedCandle.value?.timestamp, account: paperAccount.value,
+    }))
+    watch(strategyPreview, (preview) => chartAdapter?.setStrategyMarkers(preview.markers), { flush: 'post' })
+    watch([strategyConfig, candles, candleStatusByTime, indicators, mode, symbol, timeframe, chartContextLoading], () => {
+      const generation = ++strategyGeneration
+      strategySignals.value = null
+      clearTimeout(strategyTimer)
+      strategyAbort?.abort()
+      const config = strategyConfig.value
+      if (!config || config.context !== strategyContext() || !candles.value.length || chartContextLoading.value) return
+      const context = strategyContext()
+      const captured = candles.value.map((candle) => ({ ...candle }))
+      const flags = captured.map((candle) => ({ timestamp: candle.timestamp, ...candleStatusByTime.value[candle.timestamp] }))
+      strategyTimer = window.setTimeout(async () => {
+        const controller = new AbortController()
+        strategyAbort = controller
+        try {
+          const response = await fetch('/api/strategy-signals', { method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
+            body: JSON.stringify({ symbol: symbol.value, timeframe: timeframe.value, data_mode: mode.value,
+              fast_id: config.fastId, slow_id: config.slowId, quantity: Number(config.quantity), candles: captured, status: flags }),
+          })
+          const payload = await response.json()
+          if (!response.ok) throw new Error(payload.detail || 'Shared signal calculation failed.')
+          if (generation !== strategyGeneration || context !== strategyContext()) return
+          const prices = new Map(captured.map((candle) => [candle.timestamp, candle.close]))
+          strategySignals.value = { ...payload, points: payload.points.map((point) => ({ ...point, price: prices.get(point.timestamp) })) }
+        } catch (failure) {
+          if (generation === strategyGeneration && !controller.signal.aborted) strategySignals.value = { error: failure.message }
+        }
+      }, 100)
+    }, { flush: 'sync' })
+    const applyStrategy = (event) => {
+      event.preventDefault()
+      const next = { ...strategyDraft.value, context: strategyContext() }
+      const preview = evaluateSmaStrategy({ config: next, instances: indicators.value,
+        candles: [], status: {}, cutoff: null, account: null })
+      // Configuration errors have no selected-pair metadata. Warm-up/account status is not a configuration error.
+      if (!preview.fast) { strategyError.value = preview.reason; return }
+      strategyConfig.value = next
+      strategyError.value = ''
+    }
 
     const chartBarBudget = () => historyPolicy.value?.bar_budget ?? 6000
 
@@ -273,8 +342,51 @@ createApp({
       chartAdapter?.updateCandle(candle)
     }
 
+    const captureChartContext = async (selected) => {
+      if (chartContextLoading.value) throw new Error('Chart settings are loading. Wait for the indicator panel, then retry.')
+      if (!selected) throw new Error('Select a candle before asking about the chart.')
+      if (!candleStatusByTime.value[selected.timestamp]?.interval_ended) {
+        throw new Error('Select a completed candle, then recapture the chart.')
+      }
+      if (!chartAdapter) throw new Error('The chart is unavailable; reload and recapture.')
+      const frozenSymbol = symbol.value
+      const frozenInterval = timeframe.value
+      const frozenCutoff = selected.timestamp
+      const frozenAdapter = chartAdapter
+      const generation = requestGeneration
+      const indicatorVersion = indicatorMutationVersion
+      const frozenCandles = candles.value
+        .filter((candle) => candle.timestamp <= frozenCutoff && candleStatusByTime.value[candle.timestamp]?.interval_ended)
+        .slice(-200)
+        .map((candle) => ({ ...candle }))
+      const snapshotResponse = await fetch('/api/decision-snapshots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(15000),
+        body: JSON.stringify({
+          symbol: frozenSymbol,
+          timeframe: frozenInterval,
+          cutoff: frozenCutoff,
+          candles: frozenCandles,
+          ...(strategyConfig.value?.context === strategyContext()
+            ? { fast_id: strategyConfig.value.fastId, slow_id: strategyConfig.value.slowId } : {}),
+        }),
+      })
+      const snapshot = await snapshotResponse.json()
+      if (!snapshotResponse.ok) throw new Error(snapshot.detail || 'Decision snapshot could not be created.')
+      if (generation !== requestGeneration || frozenAdapter !== chartAdapter) {
+        throw new Error('The chart changed before capture. Select a completed candle and try again.')
+      }
+      const imageDataUrl = await frozenAdapter.captureThrough(
+        frozenCutoff,
+        snapshot.indicators,
+        snapshot.candles,
+      )
+      return { snapshot, imageDataUrl, frozenSymbol, frozenInterval, frozenCutoff, generation, indicatorVersion }
+    }
+
     const analyzeCandle = async (selected, automated = false) => {
-      if (decisionLoading.value) {
+      if (decisionLoading.value || chatLoading.value) {
         if (automated) throw new Error('Another chart analysis is already running.')
         return
       }
@@ -284,44 +396,7 @@ createApp({
       decisionImage.value = ''
       decisionLoading.value = true
       try {
-        if (chartContextLoading.value) throw new Error('Chart settings are loading. Wait for the indicator panel, then retry.')
-        if (!selected) throw new Error('Select a candle before asking about the chart.')
-        if (!candleStatusByTime.value[selected.timestamp]?.interval_ended) {
-          throw new Error('Select a completed candle, then recapture the chart.')
-        }
-        if (!chartAdapter) throw new Error('The chart is unavailable; reload and recapture.')
-        const frozenSymbol = symbol.value
-        const frozenInterval = timeframe.value
-        const frozenCutoff = selected.timestamp
-        const frozenAdapter = chartAdapter
-        const generation = requestGeneration
-        const frozenCandles = candles.value
-          .filter((candle) => candle.timestamp <= frozenCutoff && candleStatusByTime.value[candle.timestamp]?.interval_ended)
-          .slice(-200)
-          .map((candle) => ({ ...candle }))
-        const snapshotResponse = await fetch('/api/decision-snapshots', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: AbortSignal.timeout(15000),
-          body: JSON.stringify({
-            symbol: frozenSymbol,
-            timeframe: frozenInterval,
-            cutoff: frozenCutoff,
-            candles: frozenCandles,
-          }),
-        })
-        const snapshot = await snapshotResponse.json()
-        if (!snapshotResponse.ok) {
-          throw new Error(snapshot.detail || 'Decision snapshot could not be created.')
-        }
-        if (generation !== requestGeneration || frozenAdapter !== chartAdapter) {
-          throw new Error('The chart changed before capture. Select a completed candle and try again.')
-        }
-        const imageDataUrl = await frozenAdapter.captureThrough(
-          frozenCutoff,
-          snapshot.indicators,
-          snapshot.candles,
-        )
+        const { snapshot, imageDataUrl, frozenSymbol, frozenInterval, frozenCutoff } = await captureChartContext(selected)
         decisionSnapshot.value = snapshot
         decisionImage.value = imageDataUrl
 
@@ -355,6 +430,104 @@ createApp({
     }
 
     const askAboutChart = () => analyzeCandle(selectedCandle.value)
+
+    const newChat = () => {
+      chatGeneration += 1
+      chatConversationId.value = crypto.randomUUID()
+      chatMessages.value = [{ id: 'chat-welcome', role: 'assistant',
+        text: 'New conversation. Ask about the rules or assess the current chart.', tools: [] }]
+      chatInput.value = ''
+      chatError.value = ''
+      chatLoading.value = false
+    }
+
+    const sendChat = async (event) => {
+      event?.preventDefault()
+      const message = chatInput.value.trim()
+      if (!message || chatLoading.value || decisionLoading.value) return
+      chatError.value = ''
+      chatInput.value = ''
+      const generation = ++chatGeneration
+      const conversationId = chatConversationId.value
+      const dataMode = mode.value
+      const userId = `chat-user-${Date.now()}-${generation}`
+      chatMessages.value = [...chatMessages.value, { id: userId, role: 'user', text: message, tools: [] }]
+      chatLoading.value = true
+      try {
+        const capture = await captureChartContext(selectedCandle.value)
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(90000),
+          body: JSON.stringify({
+            message,
+            conversation_id: conversationId,
+            chart: {
+              data_mode: dataMode,
+              snapshot_id: capture.snapshot.snapshot_id,
+              symbol: capture.frozenSymbol,
+              timeframe: capture.frozenInterval,
+              cutoff: capture.frozenCutoff,
+              image_data_url: capture.imageDataUrl,
+            },
+          }),
+        })
+        const payload = await response.json()
+        if (generation !== chatGeneration || conversationId !== chatConversationId.value) return
+        if (!response.ok) throw new Error(payload.detail || 'The assistant could not answer.')
+        const currentCandles = new Map(candles.value.map((candle) => [candle.timestamp, candle]))
+        const sameCandles = capture.snapshot.candles.every((frozen) => {
+          const current = currentCandles.get(frozen.timestamp)
+          return current && ['open', 'high', 'low', 'close', 'volume'].every((key) => current[key] === frozen[key])
+        })
+        if (generation !== chatGeneration || capture.generation !== requestGeneration
+            || symbol.value !== capture.frozenSymbol || timeframe.value !== capture.frozenInterval
+            || mode.value !== dataMode || payload.conversation_id !== conversationId
+            || selectedCandle.value?.timestamp !== capture.frozenCutoff || !sameCandles
+            || capture.indicatorVersion !== indicatorMutationVersion) {
+          chatError.value = 'A delayed assistant response was discarded because the visible chart changed.'
+          return
+        }
+        const assessment = payload.assessment
+        const matchingAssessment = assessment?.status === 'ok'
+          && assessment.ticker === capture.frozenSymbol
+          && assessment.interval === capture.frozenInterval
+          && assessment.chart_time === capture.frozenCutoff
+          && assessment.snapshot_id === capture.snapshot.snapshot_id
+          && assessment.data_mode === dataMode
+        if (assessment?.status === 'ok' && !matchingAssessment) {
+          chatError.value = 'An assistant assessment was discarded because it did not match the captured chart.'
+          return
+        }
+        if (matchingAssessment) {
+          decisionSnapshot.value = assessment.decision.snapshot
+          decisionImage.value = capture.imageDataUrl
+          decisionResult.value = assessment.decision
+          voiceDecisionId.value = assessment.decision.decision_id
+          loadSavedDecisions().catch((failure) => { voiceError.value = failure.message })
+        }
+        chatMessages.value = [...chatMessages.value, {
+          id: `chat-assistant-${Date.now()}-${generation}`,
+          role: 'assistant',
+          text: payload.response,
+          tools: payload.tools ?? [],
+          assessment: matchingAssessment ? assessment : null,
+          context: {
+            ticker: capture.frozenSymbol,
+            dataMode,
+            chartTime: capture.frozenCutoff,
+            snapshotId: capture.snapshot.snapshot_id,
+          },
+        }]
+      } catch (failure) {
+        if (generation === chatGeneration) {
+          chatError.value = failure.name === 'TimeoutError'
+            ? 'The assistant timed out; the captured chart was not applied.' : failure.message
+        }
+      } finally {
+        if (generation === chatGeneration) chatLoading.value = false
+      }
+    }
 
     const loadSavedDecisions = async () => {
       const response = await fetch(`/api/saved-decisions?symbol=${encodeURIComponent(symbol.value)}`)
@@ -1163,6 +1336,9 @@ createApp({
     })
 
     onBeforeUnmount(() => {
+      clearTimeout(strategyTimer)
+      strategyAbort?.abort()
+      strategyGeneration += 1
       historyCache.dispose()
       if (historyRetryTimer !== null) window.clearTimeout(historyRetryTimer)
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
@@ -1277,6 +1453,41 @@ createApp({
               ])
             })),
           ])
+
+      const preview = strategyPreview.value
+      const smaChoices = indicators.value.filter((item) => item.type === 'sma')
+      const strategyPanel = h('section', { class: 'strategy-panel', 'aria-labelledby': 'strategy-title' }, [
+        h('h2', { id: 'strategy-title' }, 'SMA crossover strategy'),
+        h('p', 'Choose two saved SMAs below. Create or change their lengths in Configured indicators. Upward crossing enters while flat; downward crossing closes an existing position. Otherwise hold or wait.'),
+        h('form', { class: 'strategy-form', onSubmit: applyStrategy }, [
+          ...[['fastId', 'Fast SMA'], ['slowId', 'Slow SMA']].map(([key, label]) => h('label', [
+            label,
+            h('select', { 'aria-label': label, value: strategyDraft.value[key],
+              onChange: (event) => { strategyDraft.value = { ...strategyDraft.value, [key]: event.target.value } } }, [
+              h('option', { value: '' }, 'Select a saved SMA'),
+              ...smaChoices.map((item) => h('option', { value: String(item.indicator_id) }, `${item.name} · ${item.settings.window} candles`)),
+            ]),
+          ])),
+          h('label', [ 'Order size (whole shares)', h('input', { 'aria-label': 'Strategy order size',
+            type: 'number', min: '1', step: '1', value: strategyDraft.value.quantity,
+            onInput: (event) => { strategyDraft.value = { ...strategyDraft.value, quantity: event.target.value } } }) ]),
+          h('button', { class: 'replay-button', type: 'submit', disabled: chartContextLoading.value }, 'Apply strategy preview'),
+        ]),
+        strategyError.value ? h('p', { class: 'error', role: 'alert', 'data-testid': 'strategy-error' }, strategyError.value) : null,
+        h('p', { 'data-testid': 'strategy-pair' }, preview.fast
+          ? `Selected pair: ${preview.fast} (${preview.fastWindow}) / ${preview.slow} (${preview.slowWindow}); entry size ${preview.quantity}.`
+          : 'No valid strategy pair selected for this chart.'),
+        h('p', { 'data-testid': 'strategy-signal' }, preview.available
+          ? `${symbol.value} ${timeframe.value} · ${preview.chartTime} · crossover ${preview.signal} · fast ${preview.fastValue} / slow ${preview.slowValue}`
+          : 'Crossover unavailable for this candle.'),
+        h('p', { 'data-testid': 'strategy-action' }, preview.available
+          ? `Strategy preview: ${preview.action}${preview.actionQuantity ? ` ${preview.actionQuantity} shares` : ''}. ${preview.reason}` : preview.reason),
+        h('p', { 'data-testid': 'strategy-markers' }, `Chart crossover markers: ${preview.markers.length}; arrows are signals, not fills.`),
+        h('p', paperAccount.value
+          ? `Preview uses the currently loaded paper account: cash ${formatMoney(paperAccount.value.cash)}, ${paperAccount.value.shares} shares. Selecting an older candle does not reconstruct a historical account.`
+          : 'Loading the current paper account…'),
+        h('p', { class: 'sidebar-note' }, 'Preview only; applies no orders. Python computes the chart SMAs and crossover signals from completed, fully covered candles. Pair selection is local to this page; saved SMA lengths persist. Chart assessments use this pair when it is applied.'),
+      ])
 
       const account = paperAccount.value
       const paperPanel = h('section', { class: 'paper-panel', 'aria-labelledby': 'paper-title' }, [
@@ -1433,7 +1644,7 @@ createApp({
       ])
 
       const replayControls = mode.value === 'replay'
-        ? h('section', { class: 'replay-controls', 'aria-label': 'Replay selection' }, [
+        ? h('section', { key: 'replay-controls', class: 'replay-controls', 'aria-label': 'Replay selection' }, [
             h('div', { class: 'replay-label' }, [
               h('strong', 'Replay'),
               h('span', 'Read only · live Yahoo feed disconnected'),
@@ -1590,6 +1801,75 @@ createApp({
         ]),
       ])
 
+      const chatPanel = h('section', {
+        class: 'chat-panel',
+        'aria-labelledby': 'chat-title',
+      }, [
+        h('div', { class: 'chat-heading' }, [
+          h('div', [
+            h('p', { class: 'eyebrow' }, 'Backend SDK agent'),
+            h('h2', { id: 'chat-title' }, 'Decision assistant'),
+          ]),
+          h('span', { class: chatLoading.value ? 'state-badge state-on' : 'state-badge' },
+            chatLoading.value ? 'Working' : 'Ready'),
+          h('button', { type: 'button', class: 'secondary-button', onClick: newChat,
+            'data-testid': 'new-chat' }, 'New chat'),
+        ]),
+        h('p', { class: 'chat-advisory' },
+          'Every message captures the selected completed chart. Responses are advisory only and cannot place trades.'),
+        h('div', { class: 'chat-messages', 'aria-live': 'polite', 'data-testid': 'chat-messages' },
+          chatMessages.value.map((message) => h('article', {
+            class: `chat-message chat-message-${message.role}`,
+            'data-testid': `chat-${message.role}-message`,
+          }, [
+            h('strong', message.role === 'user' ? 'You' : 'Assistant'),
+            h('p', message.text),
+            message.context ? h('p', {
+              class: 'chat-context',
+              'data-testid': 'chat-assessment-meta',
+            }, [
+              `Ticker ${message.context.ticker} · ${message.context.dataMode} · chart time ${message.context.chartTime}`,
+              message.assessment?.choice ? ` · choice ${message.assessment.choice}` : '',
+              typeof message.assessment?.probability === 'number'
+                ? ` · probability ${(message.assessment.probability * 100).toFixed(0)}%` : '',
+            ]) : null,
+            ...(message.tools ?? []).map((tool, index) => h('details', {
+              class: 'chat-tool-record',
+              'data-testid': 'chat-tool-record',
+            }, [
+              h('summary', `Tool ${index + 1}: ${tool.name}`),
+              h('p', [h('strong', 'Arguments'), h('code', JSON.stringify(tool.arguments ?? {}))]),
+              h('p', [h('strong', 'Returned result'), h('code', JSON.stringify(tool.result ?? null, null, 2))]),
+            ])),
+          ]))),
+        chatError.value
+          ? h('p', { class: 'error', role: 'alert', 'data-testid': 'chat-error' }, chatError.value)
+          : null,
+        h('form', { class: 'chat-form', onSubmit: sendChat }, [
+          h('label', [
+            h('span', 'Message'),
+            h('textarea', {
+              'aria-label': 'Chat message',
+              maxlength: '2000',
+              rows: '3',
+              placeholder: 'Explain the wait rule, or assess this chart…',
+              value: chatInput.value,
+              disabled: chatLoading.value || decisionLoading.value,
+              onInput: (event) => { chatInput.value = event.target.value },
+              onKeydown: (event) => {
+                if (event.key === 'Enter' && !event.shiftKey) sendChat(event)
+              },
+            }),
+          ]),
+          h('button', {
+            class: 'replay-button',
+            type: 'submit',
+            disabled: chatLoading.value || decisionLoading.value || chartContextLoading.value || !selected || !chatInput.value.trim(),
+            'data-testid': 'chat-send',
+          }, chatLoading.value ? 'Capturing and asking…' : 'Send'),
+        ]),
+      ])
+
       const watchlistPanel = h('section', { class: 'watchlist-panel', 'aria-label': 'Watchlist symbols' }, [
         h('p', { class: 'sidebar-note' }, 'Symbols available from this local workspace.'),
         h('p', { class: 'watchlist-group' }, 'LIVE / HISTORY'),
@@ -1643,6 +1923,10 @@ createApp({
               const dock = document.querySelector('.indicator-dock')
               if (dock) { dock.open = true; dock.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }
             } }, `Indicators · ${indicators.value.length}`),
+            h('button', { class: 'toolbar-button', type: 'button', onClick: () => {
+              const panel = document.querySelector('.backtest-workspace')
+              if (panel) { panel.open = true; panel.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
+            } }, 'Backtesting'),
             h('label', { class: 'timeframe-picker mode-picker' }, [
               h('span', 'Workspace'),
               h('select', {
@@ -1664,6 +1948,18 @@ createApp({
               h('summary', [h('span', 'Watchlist'), h('small', `${1 + replaySelections.value.length}`)]),
               watchlistPanel,
             ]),
+            h('details', { key: 'indicator-dock', class: 'sidebar-section indicator-dock', 'data-testid': 'indicator-dock' }, [
+              h('summary', [h('span', 'Indicators'), h('small', `${indicators.value.length} configured`)]),
+              indicatorPanel,
+            ]),
+            h('details', { class: 'sidebar-section', open: true }, [
+              h('summary', [h('span', 'SMA Strategy'), h('small', 'Preview')]),
+              strategyPanel,
+            ]),
+            h('details', { class: 'sidebar-section', open: true }, [
+              h('summary', [h('span', 'Assistant Chat'), h('small', 'SDK agent')]),
+              chatPanel,
+            ]),
             h('details', { class: 'sidebar-section', open: true }, [
               h('summary', [h('span', 'Decision Analysis'), h('small', 'Advisory')]),
               decisionPanel,
@@ -1672,69 +1968,15 @@ createApp({
               h('summary', [h('span', 'Paper Trading'), h('small', 'Simulation')]),
               paperPanel,
             ]),
-          ]),
-          h('div', { class: 'workspace-main' }, [
-            h('div', { class: 'instrument-strip' }, [
-              h('div', [
-                h('p', { class: 'eyebrow' }, mode.value === 'replay'
-                  ? 'RECORDED MARKET SESSION'
-                  : liveCandleSource.value
-                    ? `${liveCandleSource.value.toUpperCase()} OBSERVATIONS`
-                    : historyKind.value === 'recorded' ? 'RECORDED MARKET OBSERVATIONS' : 'LABELED TEST FIXTURE'),
-                h('h1', `${symbol.value} ${mode.value === 'replay' ? 'Replay' : 'Chart'}`),
-              ]),
-              selected ? h('div', { class: 'ohlc-strip' }, [
-                h('span', `O ${selected.open}`), h('span', `H ${selected.high}`),
-                h('span', `L ${selected.low}`), h('strong', {
-                  class: selected.close >= selected.open ? 'price-up' : 'price-down',
-                }, `C ${selected.close}`),
-                h('span', `Vol ${selected.volume === null ? 'Unknown' : selected.volume}`),
-              ]) : null,
-              h('span', { class: completion.value?.interval_ended ? 'state-badge' : 'state-badge state-on' }, candleState),
-            ]),
-            replayControls,
-            mode.value === 'live' && candles.value.length
-              ? h('p', { class: 'sample-notice', 'data-testid': 'history-freshness', role: 'status' },
-                  liveCandleSource.value
-                    ? `Latest candle: ${latestCandleLabel}. Completed minutes reconcile with Yahoo reported OHLCV; provisional volume may be unknown.`
-                    : `Yahoo recorded history: latest candle ${latestCandleLabel}. ${marketState.value?.label ?? 'Waiting for feed'}.`)
-              : null,
-            mode.value === 'live' && marketState.value
-              ? h('p', { class: 'market-session-notice', 'data-testid': 'market-session' },
-                  `${marketState.value.label} · Regular session · Next open ${marketState.value.next_open}. Prices retain their source timestamps.`) : null,
-            historyFetch.value?.message
-              ? h('p', { class: 'error', role: 'status', 'data-testid': 'history-fetch-error' }, historyFetch.value.message) : null,
-            historyMessage.value && candles.value.length
-              ? h('p',{class:'sample-notice',role:'status'},historyMessage.value) : null,
-            mode.value === 'live' && !candles.value.length
-              ? h('p', { class: 'sample-notice', role: 'status' }, historyLoading.value
-                  ? 'Loading recent trading-session history. Market-closed hours do not prevent historical candles from loading.'
-                  : historyMessage.value || 'Recent history is unavailable. Retrying the backend; the market does not need to be open.') : null,
-            feedDetail.value ? h('p', { class: 'feed-detail', 'data-testid': 'feed-detail' }, feedDetail.value) : null,
-            error.value ? h('p', { class: 'error', role: 'alert' }, error.value) : null,
-            h('section', { class: 'chart-panel', 'aria-label': mode.value === 'replay' ? 'Replay chart' : 'Market chart' }, [
-              mode.value === 'replay' ? h('div', { class: 'chart-mode-banner' }, 'Replay · recorded observations') : null,
-              h('div', { ref: chartContainer, class: 'chart-container', 'data-testid': 'market-chart',
-                title: 'Scroll to zoom. Hold Shift and scroll to move left or right.' }),
-            ]),
-            h('section', { class: 'feed-panel', 'aria-label': 'Feed status' }, [
-              feedItem('Mode', mode.value === 'replay' ? 'Replay · read only' : 'Live', 'feed-mode'),
-              feedItem('Symbol', symbol.value, 'feed-symbol'),
-              feedItem('Interval', timeframe.value, 'feed-interval'),
-              mode.value==='live' && historyPolicy.value ? feedItem('History range',historyPolicy.value.label,'history-range') : null,
-              feedItem('Market session', marketState.value?.label ?? 'Fixture / replay', 'market-status'),
-              feedItem('Chart data', mode.value === 'replay' ? 'Recorded replay' : historyKind.value === 'recorded' ? 'Recorded market data' : 'TEST DATA'),
-              feedItem('Source', source.value, 'feed-source'),
-              feedItem(mode.value === 'replay' ? 'Replay observation' : 'Source age', mode.value === 'replay' ? replayTime : formatAge(sourceAgeSeconds.value), 'feed-age'),
-              feedItem('Upstream feed', feedStatus.value, 'feed-status'),
-              feedItem('FastAPI socket', backendSocketStatus.value, 'socket-status'),
-              feedItem('Candle', candleState, 'candle-state'),
-              mode.value === 'replay' ? feedItem('Replay progress', replayProgress.value, 'replay-progress') : null,
-              mode.value === 'replay' ? feedItem('Stored observations', replayStoredCount.value ?? 'Unknown', 'replay-count') : null,
-            ].filter(Boolean)),
-            mode.value === 'replay' && replayReceiptTime.value
-              ? h('p', { class: 'receipt-time', 'data-testid': 'replay-receipt-time' }, `Original backend receipt time: ${replayReceiptTime.value}`)
-              : null,
+            h(BacktestPanel, { key: 'backtest-workspace', class: 'sidebar-section', chartContext: {
+              symbol: symbol.value, timeframe: timeframe.value,
+              start: candles.value[0]?.timestamp,
+              end: candles.value.length ? new Date(Math.min(Date.now(),
+                Date.parse(candles.value.at(-1).timestamp) + ({ '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '1d': 86400 }[timeframe.value] * 1000))).toISOString() : null,
+              fast: preview.fastWindow, slow: preview.slowWindow, quantity: preview.quantity,
+            } }),
+            h('details', { key: 'candle-inspector', class: 'sidebar-section', open: true, 'data-testid': 'candle-inspector-dock' }, [
+              h('summary', [h('span', 'Inspect a candle'), h('small', 'UTC details')]),
             h('section', { class: 'inspector', 'aria-labelledby': 'inspector-title' }, [
               h('div', { class: 'inspector-heading' }, [
                 h('div', [h('p', { class: 'eyebrow' }, 'CROSSHAIR DETAILS'), h('h2', { id: 'inspector-title' }, 'Inspect a candle')]),
@@ -1770,15 +2012,72 @@ createApp({
                   ])
                 : h('p', mode.value === 'replay' ? 'Start Replay to inspect its recorded candles.' : 'Move the crosshair over a candle or choose a timestamp.'),
             ]),
-            h('details', { class: 'indicator-dock', open: true }, [
-              h('summary', `Indicators · ${indicators.value.length} configured`),
-              indicatorPanel,
+            ]),
+            h('details', { key: 'feed-status', class: 'sidebar-section', open: true }, [
+              h('summary', [h('span', 'Feed status'), h('small', `${feedStatus.value} · ${backendSocketStatus.value}`)]),
+            h('section', { class: 'feed-panel', 'aria-label': 'Feed status' }, [
+              feedItem('Mode', mode.value === 'replay' ? 'Replay · read only' : 'Live', 'feed-mode'),
+              feedItem('Symbol', symbol.value, 'feed-symbol'),
+              feedItem('Interval', timeframe.value, 'feed-interval'),
+              mode.value==='live' && historyPolicy.value ? feedItem('History range',historyPolicy.value.label,'history-range') : null,
+              feedItem('Market session', marketState.value?.label ?? 'Fixture / replay', 'market-status'),
+              feedItem('Chart data', mode.value === 'replay' ? 'Recorded replay' : historyKind.value === 'recorded' ? 'Recorded market data' : 'TEST DATA'),
+              feedItem('Source', source.value, 'feed-source'),
+              feedItem(mode.value === 'replay' ? 'Replay observation' : 'Source age', mode.value === 'replay' ? replayTime : formatAge(sourceAgeSeconds.value), 'feed-age'),
+              feedItem('Upstream feed', feedStatus.value, 'feed-status'),
+              feedItem('FastAPI socket', backendSocketStatus.value, 'socket-status'),
+              feedItem('Candle', candleState, 'candle-state'),
+              mode.value === 'replay' ? feedItem('Replay progress', replayProgress.value, 'replay-progress') : null,
+              mode.value === 'replay' ? feedItem('Stored observations', replayStoredCount.value ?? 'Unknown', 'replay-count') : null,
+            ].filter(Boolean)),
+            mode.value === 'replay' && replayReceiptTime.value
+              ? h('p', { class: 'receipt-time', 'data-testid': 'replay-receipt-time' }, `Original backend receipt time: ${replayReceiptTime.value}`)
+              : null,
             ]),
             h('footer', { class: 'attribution' }, [
               h('p', 'TradingView Lightweight Charts™ Copyright (с) 2025 TradingView, Inc.'),
               h('a', { href: 'https://www.tradingview.com/', target: '_blank', rel: 'noreferrer' }, 'Visit TradingView'),
               h('a', { href: 'https://tradingview.github.io/lightweight-charts/docs', target: '_blank', rel: 'noreferrer' }, 'Lightweight Charts documentation'),
             ]),
+          ]),
+          h('div', { class: 'workspace-main' }, [
+            h('div', { class: 'instrument-strip' }, [
+              h('div', [
+                h('p', { class: 'eyebrow' }, mode.value === 'replay'
+                  ? 'RECORDED MARKET SESSION'
+                  : liveCandleSource.value
+                    ? `${liveCandleSource.value.toUpperCase()} OBSERVATIONS`
+                    : historyKind.value === 'recorded' ? 'RECORDED MARKET OBSERVATIONS' : 'LABELED TEST FIXTURE'),
+                h('h1', `${symbol.value} ${mode.value === 'replay' ? 'Replay' : 'Chart'}`),
+              ]),
+              h('span', { class: completion.value?.interval_ended ? 'state-badge' : 'state-badge state-on' }, candleState),
+            ]),
+            replayControls,
+            mode.value === 'live' && candles.value.length
+              ? h('p', { class: 'sample-notice', 'data-testid': 'history-freshness', role: 'status' },
+                  liveCandleSource.value
+                    ? `Latest candle: ${latestCandleLabel}. Completed minutes reconcile with Yahoo reported OHLCV; provisional volume may be unknown.`
+                    : `Yahoo recorded history: latest candle ${latestCandleLabel}. ${marketState.value?.label ?? 'Waiting for feed'}.`)
+              : null,
+            mode.value === 'live' && marketState.value
+              ? h('p', { class: 'market-session-notice', 'data-testid': 'market-session' },
+                  `${marketState.value.label} · Regular session · Next open ${marketState.value.next_open}. Prices retain their source timestamps.`) : null,
+            historyFetch.value?.message
+              ? h('p', { class: 'error', role: 'status', 'data-testid': 'history-fetch-error' }, historyFetch.value.message) : null,
+            historyMessage.value && candles.value.length
+              ? h('p',{class:'sample-notice',role:'status'},historyMessage.value) : null,
+            mode.value === 'live' && !candles.value.length
+              ? h('p', { class: 'sample-notice', role: 'status' }, historyLoading.value
+                  ? 'Loading recent trading-session history. Market-closed hours do not prevent historical candles from loading.'
+                  : historyMessage.value || 'Recent history is unavailable. Retrying the backend; the market does not need to be open.') : null,
+            feedDetail.value ? h('p', { class: 'feed-detail', 'data-testid': 'feed-detail' }, feedDetail.value) : null,
+            error.value ? h('p', { class: 'error', role: 'alert' }, error.value) : null,
+            h('section', { key: 'chart-panel', class: 'chart-panel', 'aria-label': mode.value === 'replay' ? 'Replay chart' : 'Market chart' }, [
+              mode.value === 'replay' ? h('div', { key: 'replay-banner', class: 'chart-mode-banner' }, 'Replay · recorded observations') : null,
+              h('div', { key: 'market-chart-canvas', ref: chartContainer, class: 'chart-container', 'data-testid': 'market-chart',
+                title: 'Scroll to zoom. Hold Shift and scroll to move left or right.' }),
+            ]),
+
           ]),
         ]),
       ])

@@ -40,3 +40,4 @@ Thumbs.db
 backend/data/decision-captures*/
 backend/data/decision-provider-*.json
 backend/data/smoke-runs/
+backend/data/check-runs/

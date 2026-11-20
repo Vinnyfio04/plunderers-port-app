@@ -1,12 +1,15 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal
 import json
 import hashlib
 from pathlib import Path
 import sqlite3
 from threading import RLock
 from typing import Any
+from backend.accounting import (
+    FillRejected, Position, apply_fill, cents_to_dollars, dollars_to_cents, value_position,
+)
 
 
 PAPER_SCHEMA = """
@@ -126,20 +129,6 @@ def utc_text(value: datetime) -> str:
     if value.tzinfo is None:
         raise ValueError("time must include a timezone")
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def dollars_to_cents(value: Any) -> int:
-    try:
-        amount = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    except (InvalidOperation, ValueError) as error:
-        raise ValueError("price must be a positive number") from error
-    if not amount.is_finite() or amount <= 0:
-        raise ValueError("price must be a positive number")
-    return int(amount * 100)
-
-
-def cents_to_dollars(value: int) -> float:
-    return float(Decimal(value) / Decimal(100))
 
 
 @dataclass(frozen=True)
@@ -503,8 +492,7 @@ class PaperAccount:
                         "SELECT cash_cents FROM paper_accounts WHERE account_id = 1"
                     ).fetchone()[0]
                 )
-                shares = self._shares(normalized_symbol)
-                total = price_cents * quantity
+                position = Position(**self._position(normalized_symbol))
                 rejection = None
                 if order["automation_key"]:
                     event = self.automation_event(order["automation_key"])
@@ -513,15 +501,11 @@ class PaperAccount:
                         rejection = "Paper automation stopped or changed before fill."
                     elif utc_text(datetime.now(timezone.utc)) > order["decision_deadline_utc"]:
                         rejection = "Decision expired before the next eligible price."
-                if order["side"] == "buy" and total > cash_cents:
-                    rejection = rejection or (
-                        f"Insufficient cash at fill: requires ${total / 100:.2f}, "
-                        f"available ${cash_cents / 100:.2f}."
-                    )
-                elif order["side"] == "sell" and quantity > shares:
-                    rejection = rejection or (
-                        f"Insufficient shares at fill: requested {quantity}, held {shares}."
-                    )
+                if not rejection:
+                    try:
+                        filled_state = apply_fill(cash_cents, position, order['side'], quantity, price_cents)
+                    except FillRejected as error:
+                        rejection = str(error)
                 if rejection:
                     self.connection.execute(
                         """
@@ -536,32 +520,10 @@ class PaperAccount:
                     results.append({"order_id": order["order_id"], "status": "rejected"})
                     continue
 
-                position = self._position(normalized_symbol)
-                cost_basis = position["cost_basis_cents"]
-                realized = position["realized_pnl_cents"]
-                if shares == 0:
-                    cost_basis = 0
-                    realized = 0 if realized is None else realized
-
-                next_cash = cash_cents - total if order["side"] == "buy" else cash_cents + total
-                next_shares = shares + quantity if order["side"] == "buy" else shares - quantity
-                if order["side"] == "buy":
-                    next_basis = None if cost_basis is None else cost_basis + total
-                    next_realized = realized
-                elif cost_basis is None or realized is None:
-                    next_basis = None if next_shares else 0
-                    next_realized = None
-                else:
-                    removed_basis = (
-                        cost_basis
-                        if quantity == shares
-                        else int(
-                            (Decimal(cost_basis) * Decimal(quantity) / Decimal(shares))
-                            .quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-                        )
-                    )
-                    next_basis = cost_basis - removed_basis
-                    next_realized = realized + total - removed_basis
+                next_cash = filled_state.cash_cents
+                next_shares = filled_state.position.quantity
+                next_basis = filled_state.position.cost_basis_cents
+                next_realized = filled_state.position.realized_pnl_cents
                 self.connection.execute(
                     "UPDATE paper_accounts SET cash_cents = ? WHERE account_id = 1",
                     (next_cash,),
@@ -693,18 +655,11 @@ class PaperAccount:
         quantity = int(position["quantity"])
         basis = position["cost_basis_cents"]
         realized = position["realized_pnl_cents"]
-        average_cost = (basis / quantity) if quantity and basis is not None else None
-        available = realized is not None and (quantity == 0 or basis is not None)
-        unrealized = (
-            price_cents * quantity - basis
-            if available and quantity and basis is not None
-            else 0 if available else None
-        )
-        total_pnl = (
-            realized + unrealized
-            if available and realized is not None and unrealized is not None
-            else None
-        )
+        valuation = value_position(Position(quantity, basis, realized), price_cents)
+        average_cost = valuation['average_cost_cents']
+        available = valuation['valuation_available']
+        unrealized = valuation['unrealized_cents']
+        total_pnl = valuation['total_pnl_cents']
         self.connection.execute(
             """
             INSERT INTO paper_pnl_history (
@@ -776,6 +731,7 @@ class PaperAccount:
                 "symbol": normalized_symbol,
                 "initial_cash": cents_to_dollars(int(account["initial_cash_cents"])),
                 "cash": cents_to_dollars(int(account["cash_cents"])),
+                "cash_cents": int(account["cash_cents"]),
                 "shares": int(position["quantity"]),
                 "average_cost": (
                     cents_to_dollars(position["cost_basis_cents"])

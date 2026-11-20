@@ -1,0 +1,5 @@
+# Workstation SDK chat panel
+
+Add a chat panel connected to the backend SDK agent. Let the user ask about decision rules or request an assessment of the chart currently on screen, capturing the chart when the message is sent. Define how unclear requests such as "Should I wait?" are clarified. Show the response and expandable tool calls with returned results. Report ticker, chart time, choice, and returned probability when available. Keep chat, preview, and chart result consistent using the same tool result, rejecting delayed results for another ticker or snapshot. Rule explanations must not trigger assessment. Verify rule, assessment, and tool-failure paths in the running app and compare chat/tool/chart data. Keep the API key backend-only and trading actions outside this task. Follow CHECK, TAKE ACTION, VERIFY for dependency changes. Work on the requested workplace-chatbot branch.
+
+Chosen unclear-request instruction: ask "Would you like the wait rule explained, or should I assess the captured chart?" and call neither tool until clarified.

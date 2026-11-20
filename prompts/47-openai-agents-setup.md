@@ -1,0 +1,3 @@
+# Prepare OpenAI Python and Agents SDK dependencies
+
+Use the backend's existing Python environment and the project's CHECK, TAKE ACTION and VERIFY dependency procedure. Inspect the interpreter, package environment, existing OpenAI distributions and baseline `pip check`; confirm compatibility for `openai==3.52.0` and `openai-agents==0.24.0`. After approval, install those exact versions, pin them in the backend dependency file, import `AsyncOpenAI`, `Agent`, `Runner` and `function_tool`, print installed versions, rerun `pip check`, record observed results and report whether the backend needs a restart. Do not create a new environment or alter unrelated packages to bypass conflicts.

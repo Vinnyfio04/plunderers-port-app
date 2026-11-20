@@ -2,7 +2,7 @@
 
 ## Project overview
 
-Plunderer's Port is a lightweight, TradingView-style local application for people who want to observe markets and make more informed trading decisions. It is aimed especially at less-experienced traders. Yahoo Finance supplies the planned live stream, while the local paper account and agentic helper support practice and explanation. The helper is advisory; the user remains responsible for every trading decision. [Part 4.1 assignment instructions and the current gap assessment](docs/assignment_instructions.md) distinguish the live deliverable from the synthetic CSV practice data.
+Plunderer's Port is a lightweight, TradingView-style local application for people who want to observe markets and make more informed trading decisions. It is aimed especially at less-experienced traders. Yahoo Finance supplies recorded history and the live-feed integration; the local paper account, SMA backtester and agentic helper support practice, measurement and explanation. The helper is advisory; the user remains responsible for every trading decision. [Part 4.1 assignment instructions and the current gap assessment](docs/assignment_instructions.md) distinguish the live deliverable from the synthetic CSV practice data.
 
 ## Goals
 
@@ -20,6 +20,14 @@ Plunderer's Port is a lightweight, TradingView-style local application for peopl
 - **External services:** Yahoo Finance through yfinance for market observations; OpenAI for optional decision and voice features.
 
 ## Current status
+
+The seven-stage SMA/simulation/backtesting implementation is complete locally as of November 19, 2026. Two selected SMAs and crossover markers share reference-verified Python calculations; separate backtest accounts reuse the cent-based ledger and save settings, frozen datasets, trades and equity. The Backtesting workspace presents those results and their limitations. The complete local check command passed all 11 groups; GitHub Actions is configured for pushes/PRs but its hosted run awaits a reviewed commit/push. No live brokerage execution is enabled. See the [strategy, accounting and backtest guide](docs/strategy-workstation.md) for operation, assumptions, evidence and what the results leave uncertain; [current handoff](handoffs/current.md) identifies the source entry points and remaining checks.
+
+Chat retains recent messages and the latest full assessment tool result per ticker and Live/Replay mode in the current conversation. Ask to run a new decision and compare it with the earlier assessment to see both UTC chart times, choices and available probabilities. If no matching earlier assessment exists, the response says so. **New chat** clears the panel and starts a separate conversation; pending old replies cannot enter it. Memory is local to the running backend (64 recent conversations, six message pairs and eight ticker/mode assessment slots per conversation); restarting the backend or reloading the page starts without the previous conversation. It is not a persistent chat archive. The focused repeatable comparison check is `node scripts/smoke-test.mjs --chat-comparison-only`; it saves screenshots and observed tool results in `docs/evidence/chat-comparison-<run timestamp>/`.
+
+Assistant Chat uses the backend OpenAI Agents SDK through `POST /api/chat`. Ask for a rule explanation or explicitly request an assessment of the selected completed chart. Each message freezes up to 200 completed candles and captures the matching PNG. Rule questions use only the rule tool; an unclear "Should I wait?" asks whether to explain the rule or assess the chart. Expand each tool record to inspect arguments and results. Successful assessments update Decision Analysis from the same tool result, showing ticker, UTC chart time, choice, and probability when returned. Probability is a provider output, not a calibrated success guarantee. Chart changes while waiting discard the delayed answer.
+
+Set `OPENAI_API_KEY` privately in the backend environment and restart FastAPI for actual chat; never set a frontend key. `CHAT_MODEL` defaults to `gpt-6-luna`; `CHAT_BASE_URL` optionally overrides the Responses API endpoint (otherwise `OPENAI_BASE_URL` or the official API is used). The assessment tool reuses the existing analyst/reviewer pipeline and cannot place orders. Run `node scripts/smoke-test.mjs --chat-only` for the focused SDK/browser check: isolated SQLite, synthetic candles, deterministic SDK model, and local decision provider. It verifies rules, clarification, delayed-response rejection, synchronized assessment, and tool failure. The complete existing regression remains `node scripts/smoke-test.mjs`.
 
 The backend owns the Yahoo collector, session scheduling and SQLite recorder independently of browser tabs. The default store is `backend/data/market.db`; startup migrates the old store safely and serves indexed current candles immediately. Empty stores fetch seven calendar days of real Yahoo AAPL minute bars; existing stores reconcile an overlapping recent range in the background. The chart reconnects after backend interruptions, shows dated UTC labels and market-closed/next-open status, and appends actual next-session candles without invented overnight bars. Replay reconstructs saved observations in receipt order. CSV is available only through an explicit labeled `MARKET_CANDLE_FILE` development fixture. The expanded offline browser regression passes, including session reopening, chart capture, indicators and paper accounting. An actual regular-session Yahoo observation has **not yet** been matched through SQLite, WebSocket and the visible chart, so Part 4.1 live-streaming evidence remains pending.
 
@@ -49,6 +57,8 @@ The plain `python` command currently resolves to a nonworking Windows Store alia
 - TradingView Lightweight Charts `5.2.1`
 - yfinance `1.8.0`
 - exchange-calendars `4.13.2`
+- OpenAI Python SDK `3.52.0`
+- OpenAI Agents SDK `0.24.0`
 
 The backend dependencies are pinned in `backend/requirements.txt`. Frontend dependency declarations and exact transitive resolutions are in `frontend/package.json` and `frontend/package-lock.json`.
 
@@ -57,6 +67,8 @@ The backend dependencies are pinned in `backend/requirements.txt`. Frontend depe
 ### Install dependencies
 
 Use the existing Python installation; do not create a virtual environment by default.
+
+Dependencies are already installed in the checked local environment. Reuse them. Follow AGENTS.md CHECK/TAKE ACTION/VERIFY and obtain approval before any missing-package installation or dependency manifest/lockfile change; the installation commands below are for an approved setup, not a required reinstall before each run.
 
 From the project root:
 
@@ -119,6 +131,20 @@ The dashboard shows symbol, interval, data source, source age, upstream feed sta
 
 ### Configured indicators
 
+Open **Indicators** in the left **Workspace** to create or update indicators. It is its own collapsible section, alongside SMA Strategy, Assistant Chat, Decision Analysis and Paper Trading. Candle inspection, feed status and Backtesting also live in Workspace. The chart is the last item of the main chart area; no controls or detail panels follow it. On narrow screens the Workspace tools precede the chart.
+
+Focused layout/indicator verification: `node scripts/smoke-test.mjs --layout-only` uses temporary services/data and checks desktop/mobile fit plus SMA creation/update against SQLite. The full SmokeTest also includes the layout assertions. Read-only capture of the running workstation is available with `node scripts/backtest-workspace-evidence.mjs --layout-only`; it waits for saved candles and indicator controls and makes no indicator/order/model request.
+
+The **SMA Strategy** panel lets you explicitly select a saved fast/slow SMA pair and positive whole-share entry size, then click **Apply strategy preview**. Create or edit the SMA lengths in Configured indicators; fast must be shorter than slow. The selected pair determines upward/downward signal arrows and the preview at the inspected candle. SMAs share the candle price axis. A third SMA does not silently replace your selected pair.
+
+Preview rules: buy the configured quantity on an upward crossover while flat if the currently loaded paper account has enough cash at the inspected price; close the entire holding on a downward crossover; otherwise hold an existing position or wait while flat. There is no additional buying while already invested. Warm-up, unfinished or incompletely covered candles suppress actionable signals. Crossing means previous fast-minus-slow <= 0 then > 0 (upward), or >= 0 then < 0 (downward); equality alone is not a crossing.
+
+This is a preview and creates no orders. It uses the current account, even when inspecting an older candle; it is not a backtest. Pair/quantity choices are page-local and scoped to the current mode/symbol/interval; saved SMA instances/lengths remain persistent. Python SMA/crossover math is shared between chart indicators, the preview, frozen assessments and backtests. An applied pair is included in the assessment snapshot; without one, the existing shortest/longest SMA selection remains the fallback. JavaScript only displays Python signals and applies the action-preview policy.
+
+SMA values use the latest N eligible completed candles (no invented bars), with null at unfinished/explicitly partial candles and until N eligible closes are available. A missing/null value breaks crossover comparison; the selected candle must itself be ready. Values within absolute or relative 1e-12 are treated as equal for crossing detection. Corrections update indicator history when available; they do not rewrite executed trades. Incremental append updates calculate one new output; unchanged contexts calculate none; revisions rebuild the changed suffix of bounded retained context. The in-process SMA cache retains at most 32 instance/window contexts.
+
+Trusted-reference check, using the documented Python executable: `-m backend.check_sma_engine` compares batch and incremental outputs against installed pandas `rolling(N,min_periods=N,center=False).mean()` on identical eligible data (numeric tolerance absolute 1e-10 / relative 1e-12). It covers every tested prefix, maximum window, warm-up, forming updates/completion, partial/missing flags, equality, corrections and no future-data leakage. No new dependency was installed for those checks. Additional checks: `node --test scripts/check-sma-strategy.mjs` and `node scripts/smoke-test.mjs --strategy-only`; the browser check compares chart/preview/frozen-assessment values, drawn markers, stale-response rejection and Replay/Live chart reuse with an isolated account and no model calls. Shared accounting, isolated backtesting and their performance UI are implemented below.
+
 The dashboard can create named indicator instances for the selected symbol and timeframe. FastAPI exposes the available types and their setting contracts at `GET /api/indicator-types`; saved instances and calculated values are available from `GET /api/indicators`. `POST /api/indicators` validates and stores a new instance.
 
 Every indicator uses the same Python interface:
@@ -126,7 +152,7 @@ Every indicator uses the same Python interface:
 - **Inputs:** timestamped candles in order, their separate `interval_ended` completion flags, and settings validated for the selected indicator type.
 - **Completion rule:** only completed candles enter a rolling window.
 - **Output:** exactly one timestamped entry per source candle. Its `value` is numeric when the window is ready, or `null` for a warm-up gap or an incomplete candle.
-- **SMA:** input is `close` in price units; output is the arithmetic mean in price units.
+- **SMA:** input is `close` in price units; output is the arithmetic mean in price units. Explicitly partial-coverage candles are excluded and output null; their closes do not enter the SMA window.
 - **Rolling price range:** inputs are `high` and `low` in price units; output is `highest high - lowest low` in price-difference units.
 - **Window setting:** a whole number from 1 through 10,000, measured in completed candles.
 
@@ -167,7 +193,15 @@ The simulated fill rule is deliberately simple: an accepted order records the la
 
 At fill time Python rechecks cash and shares. The account cash, position, fill row, and order status are committed in one SQLite transaction. Each fill records its order, price, source observation ID, receipt ID, paper market-event ID, and execution time. A unique stable `request_id` makes a retry return the existing order without another order or fill.
 
-The same account now keeps append-only P&L history. Buys add to the position's weighted-average cost basis. Partial sales realize the sold shares' difference from that average without changing the remaining per-share cost; a close realizes the remainder. Every fill is valued at its fill price. A newly completed one-minute candle adds a separate valuation row while a position is open. Each row preserves cash, shares, average cost, cumulative realized P&L, unrealized P&L, total P&L, valuation time/source, and links to the underlying fill and/or stored observation. Stable event keys make fill and completed-candle reprocessing idempotent.
+The same account now keeps append-only P&L history. Buys add to the position's weighted-average cost basis. Partial sales allocate the proportional basis rounded to the nearest cent (ROUND_HALF_UP), so remaining per-share cost may change by a fractional cent; a full close removes the entire remaining basis and realizes the remainder. Every fill is valued at its fill price. A newly completed one-minute candle adds a separate valuation row while a position is open. Each row preserves cash, shares, average cost, cumulative realized P&L, unrealized P&L, total P&L, valuation time/source, and links to the underlying fill and/or stored observation. Stable event keys make fill and completed-candle reprocessing idempotent.
+
+Step 3 extracts the common integer-cent fill, money conversion, entry quote and valuation functions into `backend/accounting.py`. The SQLite paper account still uses its existing transactions, IDs and order/observation links. Account responses additionally expose integer `cash_cents`; the strategy preview compares it with the backend's `estimated_cost_cents` rather than rounding dollar values in the browser. This is an indicative price estimate; the actual later fill always rechecks cash and shares.
+
+`backend/simulation_account.py` provides a separate, in-memory `SimulationAccount` for each symbol/run. It has no database/path argument and cannot use the production account's connection. Its order IDs, cash, holdings, price events and copied valuation history belong to that instance. The backend drives this primitive and persists completed backtests through the API below; the Backtesting workspace presents those saved results. In-flight state is not restart-resumable.
+
+Both adapters use long-only whole shares, integer cents, weighted-average basis, zero fees and zero added slippage. Pending orders are processed in submission order; cash/shares are not reserved at submission and are rechecked for each fill, so a later pending order can be rejected. Close captures the currently held quantity at submission. The isolated observation adapter accepts the next delivered eligible price event; its bar adapter accepts only a subsequent open event, with no high/low/close input. Valuation marks never fill orders. Availability times must be timezone-aware and nondecreasing; equal timestamps are permitted for causally ordered events (for example, a close-time decision followed by the next bar's open at that boundary). IDs make retries idempotent; changed contents require a new event ID. Missing valuation prices remain unavailable instead of becoming zero. The historical runner enforces event ordering under the selected data-vintage/availability assumptions described below.
+
+Run `-m backend.check_accounting` with the documented Python interpreter for the known $1,000→$1,025 example, SQL/in-memory parity, cent-allocation losses, fill-time rejection, duplicate/history isolation, next-open execution and no-database-access checks. Existing paper/P&L checks and `node scripts/smoke-test.mjs` remain the integration regressions. No additional package or schema migration was needed for step 3.
 
 If an open position lacks a usable cost basis or valuation price, the dashboard labels its valuation `Unavailable` instead of treating it as zero. Earlier rows remain readable after later valuations and after the position closes.
 
@@ -198,6 +232,37 @@ Run the deterministic P&L fixture against a new disposable database path:
 The check starts at $1,000, exercises two completed-candle valuations between three fills, verifies a repeated event key remains one row, compares the five expected P&L states with direct SQLite, and reopens the database to prove persistence.
 
 Use a new disposable path. The check refuses to reuse an existing file.
+
+### Backtesting backend (step 4)
+
+The backend runs and saves isolated SMA crossover backtests. Every run starts flat with its own configured cash and the shared long-only accounting engine. It never submits to the live paper account. No provider/model call or Yahoo download is made by a backtest.
+
+`POST /api/backtests` accepts a unique `request_id` plus settings such as:
+
+```json
+{"request_id":"example-run-1","symbol":"AAPL","timeframe":"1m","start":"2026-11-13T14:30:00Z","end":"2026-11-13T21:00:00Z","fast_window":5,"slow_window":20,"quantity":1,"starting_cash":1000,"data_mode":"historical_bars"}
+```
+
+The range is [start,end), based on bar starts, with completed decisions allowed at the end boundary. Up to slow+1 earlier stored bars warm indicators without trading. Configure 1 <= fast < slow <= 10000, positive whole-share size <= 1,000,000, and positive starting cash. Inputs must already exist locally; empty/oversized ranges return validation errors instead of downloading or silently truncating. The limit is 10,000 trading candles and 50,000 scheduled events. One backtest runs at a time, outside the market writer queue; retry a busy request with its same ID. Reusing an ID with different settings returns 409.
+
+- `historical_bars` supports stored 1m/5m/15m/1h/1d history, freezing the latest stored versions at `frozen_at` (defaults to current UTC). It assumes the open was known at bar start and the close at bar end. It does not reconstruct what an observer knew before later revisions or downloads; that limitation is returned with every run. Opens can fill pending orders before that candle's eventual completion/coverage is known; unfinished/partial closes cannot generate signals. Missing bars are never invented.
+- `recorded` currently supports 1m, using saved candle-revision availability and actual observation-receipt times. Late downloads/revisions only inform subsequent decisions when available; they cannot rewrite an earlier trade. Same-time receipts are processed before a decision and cannot fill their own signal. A dataset downloaded after the requested session alone cannot support this mode.
+
+The strategy enters on upward crossover while flat, closes on downward crossover while long, and otherwise holds/waits. Only one order may remain pending; later signals do not duplicate it. Fixed-bar execution uses the next available open; recorded execution uses a later eligible receipt. Cash/shares are rechecked at fill, and insufficient funds can reject an order after a gap. There is no forced final liquidation or invented final fill: holdings remain marked at the last usable price, unavailable valuation stays null, and a final signal can leave an unfilled pending order. Fees and added slippage remain zero; dividends/splits and actual tradeability are not modeled. Results measure these assumptions on these inputs, not future profitability.
+
+`GET /api/backtests?limit=20&offset=0` lists summaries. `GET /api/backtests/{run_id}` retrieves settings, limitations, decisions with both bar/decision times, orders with fills, valuation/equity rows, final state and input/result hashes. `GET /api/backtests/{run_id}/dataset` returns its frozen source evidence. `POST /api/backtests/{run_id}/rerun` with a new `request_id` uses those saved inputs and settings, not current market data; deterministic result hashes exclude the new run identity and should match.
+
+Version 5 adds only backtest_datasets/runs/orders/decisions/equity tables, isolated by run UUID with no foreign keys to live accounts or orders. The dataset and result are stored transactionally, survive restart, and retain source/vintage/adjustment assumptions. Fills are retained inside each backtest order; sequence fields preserve multiple equity events at a candle boundary. Existing account, decision and legacy recovery records are preserved. Use the selected Python interpreter with `-m backend.check_backtests` for offline causality, migration, persistence, API/idempotency and isolation verification.
+
+### Backtesting workspace (step 5)
+
+Click **Backtesting** in the toolbar or its Workspace dropdown to open the strategy lab in the sidebar. **Use loaded chart range** copies the currently loaded ticker/interval/range (including bars outside the current zoom) and the applied SMA pair/quantity if available. Review the UTC range, data mode, SMA lengths, entry size and starting cash, then click **Run backtest**. You can also type a stored ticker and range directly. Historical mode assumes boundary availability on a fixed dataset vintage; Recorded availability is restricted to 1m and requires original saved revisions/receipts. A later download alone cannot recreate those arrivals. Unavailable data returns an error, with any earlier result retained and labeled.
+
+Select a saved run to see its immutable settings, equity curve, starting/final cash and equity, shares, realized/unrealized/total P&L, return on starting cash, and fill/pending/rejection counts. **Orders and fills**, **Decisions** (chart time and decision time), and **Equity audit** show 25 rows per page. No final liquidation is assumed. A pending order is not a fill, and fill-time cash failures are shown as rejections. Unavailable valuations remain gaps rather than zero. Execution, fee/slippage, rounding, cost-basis, data-vintage and revision limitations appear below the results, with links to the full saved result and frozen source JSON.
+
+**Rerun saved dataset** creates a separate saved run from the exact original inputs and reports whether both hashes match. Editing form settings or changing the live chart never relabels the selected result. Browser reload retains server-side runs; reopen one from Saved runs. Failed requests leave the selected result intact. A network retry with unchanged settings reuses its request ID to avoid duplicate saved runs. These results demonstrate the specified simulation on the stored dataset, not future profitability.
+
+Repeatable UI check: `node scripts/smoke-test.mjs --backtests-only` starts and stops Chrome and test services with a disposable constructed-data database. The complete regression remains `node scripts/smoke-test.mjs` and includes the backtest workspace; step 6 also includes it in the complete automated checks described below. For read-only screenshots of an existing AAPL run in the running workstation, use `node scripts/backtest-workspace-evidence.mjs`; it defaults to localhost:5173 and never creates a backtest or submits an order. Optional `BACKTEST_WORKSPACE_URL` and `BACKTEST_RUN_ID` choose another local workstation/saved run. See [verification.md](docs/verification.md) for evidence and limitations.
 
 ### Ask about a frozen chart
 
@@ -378,9 +443,21 @@ From the project root, with the existing backend requirements and locked fronten
 node scripts/smoke-test.mjs
 ```
 
-This starts FastAPI and Vue on temporary localhost ports, waits for both, opens the installed Chrome (or Edge) in headless mode, and drives the real dashboard. It seeds a fresh SQLite account and recorded session under ignored `backend/data/smoke-runs/` and uses a local model test double with no provider credentials or Yahoo connection. The browser replays observations, creates and edits an SMA, captures a chart PNG, checks a model failure, and runs approved buy/sell/close automation with a veto, duplicate candle, and Stop. It compares displayed values with direct SQLite queries. A missing expected result returns a nonzero exit code. Browser and service processes close on success or failure; a failed run retains an ignored screenshot and database for diagnosis, while a passing run removes its temporary folder. Set `SMOKE_PYTHON` or `SMOKE_CHROME` to an installed executable path only if autodetection fails. The same command runs on every push in `.github/workflows/smoke-test.yml` after the workflow installs the already-declared dependencies in its temporary Windows runner.
+This starts FastAPI and Vue on temporary localhost ports, waits for both, opens the installed Chrome (or Edge) in headless mode, and drives the real dashboard. It seeds a fresh SQLite account and recorded session under ignored `backend/data/smoke-runs/` and uses a local model test double with no provider credentials or Yahoo connection. The browser replays observations, creates and edits an SMA, captures a chart PNG, checks a model failure, and runs approved buy/sell/close automation with a veto, duplicate candle, and Stop. It also verifies backtest settings/results against SQLite, pending/rejected orders, pagination, a lost-response retry without duplication, and saved IDs/results across a real backend restart. A missing expected result returns a nonzero exit code. Browser and service processes close on success or failure; a failed run retains an ignored screenshot and database for diagnosis, while a passing run removes its temporary folder. Set `SMOKE_PYTHON` or `SMOKE_CHROME` to an installed executable path only if autodetection fails. This command is included in the complete local/CI sequence below.
 
 Expected final fixture state: `$1,025` cash, zero shares, `$25` realized and `$0` unrealized P&L, three fills, and no extra order after Stop. The live Yahoo feed, authenticated image-model call, and two-way voice hardware check remain separate from this offline SmokeTest.
+
+### Complete automated checks (step 6)
+
+From the project root, run the same sequence used by GitHub Actions:
+
+```powershell
+node scripts/check-project.mjs
+```
+
+This runs pip integrity, eight pandas-reference/batch/incremental SMA tests, eight accounting tests, eight causal backtest/API/persistence tests, SDK conversation-memory checks, seven frontend policy tests, the production build, the full browser SmokeTest, and focused strategy/chat/conversation-comparison browser checks. It reuses installed tools, forces offline test providers with no API key, uses disposable databases, stops at the first failure and returns nonzero. Logs and a JSON summary (including unrun checks on failure) remain under ignored `backend/data/check-runs/check-*/`. `--core-only` selects non-browser checks; `--browser-only` selects the four browser commands. `SMOKE_EVIDENCE_DIR` can redirect standalone browser evidence; the complete runner collects it inside that run's log directory.
+
+`.github/workflows/smoke-test.yml` runs this command on pushes, pull requests and manual dispatch, using Windows, Python 3.13 and Node 24. It installs the existing backend manifest and locked frontend dependencies in the temporary hosted runner, cancels superseded runs on the same ref, and retains check logs/summaries plus fixture browser evidence for seven days, including failure screenshots when present. No provider secret or production database is supplied. Local and hosted runtime/package patches can differ; a local pass is not a claim that a hosted run has executed. See [verification.md](docs/verification.md) for observed local results/current hosted-run status and the [final handoff](handoffs/current.md) for review and remaining evidence gaps.
 
 ### Talk about a saved paper decision
 
@@ -436,84 +513,45 @@ Repeatable checks and their detailed results are in [docs/verification.md](docs/
 
 ## Folder map
 
+Selected current files (generated data, logs and dependencies are omitted):
+
 ```text
 live-market-workplace/
-|-- README.md
-|-- AGENTS.md
-|-- .github/
-|   `-- workflows/smoke-test.yml
+|-- README.md / AGENTS.md / report.md
+|-- .github/workflows/smoke-test.yml
 |-- backend/
-|   |-- candle_aggregation.py
-|   |-- check_candle_aggregation.py
-|   |-- check_decision_snapshot.py
-|   |-- check_decision_review.py
-|   |-- check_market_store.py
-|   |-- check_timeframe_history.py
-|   |-- check_live_candles.py
-|   |-- check_indicators.py
-|   |-- check_paper_account.py
-|   |-- check_paper_automation.py
-|   |-- check_pnl_history.py
-|   |-- check_replay_session.py
-|   |-- check_replay_websocket.py
-|   |-- check_voice_session.py
-|   |-- decision_provider_double.py
-|   |-- decisions.py
-|   |-- data/
-|   |   `-- automation-browser-candles.csv
-|   |-- live_candles.py
-|   |-- indicators.py
-|   |-- main.py
-|   |-- market_store.py
-|   |-- paper_trading.py
-|   |-- replay_session.py
-|   |-- requirements.txt
-|   |-- smoke_fixture.py
-|   |-- smoke_state.py
-|   |-- timeframe_history.py
-|   |-- voice.py
-|   `-- yahoo_stream.py
+|   |-- main.py / database.py / write_coordinator.py
+|   |-- market_store.py / candle_store.py / recorded_history.py
+|   |-- live_candles.py / yahoo_history.py / yahoo_stream.py
+|   |-- daily_history.py / interval_history.py / timeframe_history.py
+|   |-- sma_engine.py / indicators.py
+|   |-- accounting.py / paper_trading.py / simulation_account.py
+|   |-- backtesting.py / backtest_store.py
+|   |-- decisions.py / chat_agent.py / voice.py / replay_session.py
+|   |-- check_sma_engine.py / check_accounting.py / check_backtests.py
+|   |-- check_chat_memory.py / other focused check_*.py modules
+|   `-- requirements.txt
 |-- frontend/
-|   |-- src/
-|   |   |-- chartAdapter.js
-|   |   |-- main.js
-|   |   `-- style.css
-|   |-- index.html
-|   |-- package.json
-|   |-- package-lock.json
-|   `-- vite.config.js
+|   |-- src/main.js / chartAdapter.js / historyCache.js
+|   |-- src/BacktestPanel.js / smaStrategy.js / style.css
+|   `-- package.json / package-lock.json / vite.config.js
 |-- docs/
-|   |-- design-pipeline.md
-|   `-- verification.md
+|   |-- strategy-workstation.md / design-pipeline.md
+|   |-- assignment_instructions.md / verification.md
+|   `-- evidence/
 |-- prompts/
-|   |-- data/
-|   |   `-- sample-candles.csv
-|   |-- 01-generic-project-startup.md
-|   |-- 02-connect-vue-fastapi.md
-|   |-- 03-serve-candle-history.md
-|   |-- 04-display-candles-with-lightweight-charts.md
-|   |-- 05-yahoo-finance-stream.md
-|   |-- 06-record-yahoo-updates-sqlite.md
-|   |-- 07-aggregate-observations-into-candles.md
-|   |-- 08-history-timeframes.md
-|   |-- 09-live-chart-websocket.md
-|   |-- 10-recorded-session-replay.md
-|   |-- 11-extensible-indicators.md
-|   |-- 12-long-only-paper-account.md
-|   |-- 13-paper-account-pnl-history.md
-|   |-- 14-ask-about-chart.md
-|   |-- 15-two-role-decision-review.md
-|   |-- 16-reviewed-paper-automation.md
-|   |-- 17-decision-voice-conversation.md
-|   `-- 18-offline-browser-smoketest.md
+|   |-- numbered prompt history 01 through 56
+|   `-- data/ (labeled CSV fixtures)
 |-- scripts/
-|   `-- smoke-test.mjs
+|   |-- check-project.mjs / smoke-test.mjs
+|   |-- backtest-browser-checks.mjs / backtest-workspace-evidence.mjs
+|   `-- check-sma-strategy.mjs / check-history-cache.mjs
 `-- handoffs/
-    |-- create-handoff.md
-    `-- current.md
+    |-- current.md
+    `-- 2026-11-19-before-final-handoff.md
 ```
 
-See [docs/design-pipeline.md](docs/design-pipeline.md) for planned responsibilities and data flow.
+The ignored production store is backend/data/market.db; generated test stores/logs remain under backend/data with their documented exclusions. See [design-pipeline.md](docs/design-pipeline.md) for the implemented data flow and [strategy-workstation.md](docs/strategy-workstation.md) for operation and assumptions.
 
 
 ## Recorded live history verification

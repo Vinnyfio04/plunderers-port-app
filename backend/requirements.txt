@@ -2,3 +2,5 @@ fastapi==0.162.3
 uvicorn==0.54.0
 yfinance==1.8.0
 exchange-calendars==4.13.2
+openai==3.52.0
+openai-agents==0.24.0

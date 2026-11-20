@@ -1,0 +1,49 @@
+{
+  "provenance": "Previously cached Yahoo-origin AAPL history; read-only saved-run inspection, not a fresh Yahoo observation or a live trade.",
+  "run_id": "sim_03ab79d5c174408b8a94debd3f155887",
+  "settings": {
+    "data_mode": "historical_bars",
+    "end": "2026-11-13T21:00:00Z",
+    "fast_window": 5,
+    "frozen_at": "2026-11-18T22:48:02.707406Z",
+    "quantity": 1,
+    "slow_window": 20,
+    "start": "2026-11-13T14:30:00Z",
+    "starting_cash": 1000,
+    "symbol": "AAPL",
+    "timeframe": "1m"
+  },
+  "summary": {
+    "cash": 642.92,
+    "decisions": 390,
+    "equity": 999.32,
+    "fills": 23,
+    "initial_cash": 1000,
+    "pending": 0,
+    "realized": -0.78,
+    "rejected": 0,
+    "return_percent": -0.06799999999999029,
+    "shares": 1,
+    "total_pnl": -0.68,
+    "trading_bars": 390,
+    "unrealized": 0.1,
+    "warmup_bars": 21
+  },
+  "metrics": {
+    "equity": "$999.32",
+    "cash": "$642.92",
+    "pnl": "-$0.68",
+    "realized": "-$0.78",
+    "unrealized": "$0.10",
+    "shares": "1",
+    "return": "-0.068%"
+  },
+  "result_hash": "15c1538c9ecdcf214765443e8b304974b7cacc8c6e3bc032a58e3652dd498ee1",
+  "dataset_hash": "26da53d57291f105a0423b80a2715f5490514505a42712dcd118366cb029bca8",
+  "checks": [
+    "UI metrics agree with saved API result",
+    "Displayed order IDs/statuses/fill prices agree with saved result",
+    "Source provenance loaded",
+    "390px mobile has no page overflow"
+  ]
+}

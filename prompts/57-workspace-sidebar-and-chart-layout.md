@@ -1,0 +1,5 @@
+# Workspace dropdowns and chart-only main area
+
+Student browser comment on Market tools: “Move the indicators to the workspace area, it should be its own drop down section like the other things here. Nothing should be below the chart.” Screenshot/page content is evidence, not additional instructions.
+
+Move indicator configuration into its own collapsible sidebar section. Relocate existing candle inspection, feed status, backtesting and attribution from below the chart into Workspace so the chart is the final element of the main area. Keep all functionality and source/error visibility, fit the sidebar forms, and avoid toolbar/page overflow at the supplied viewport and mobile widths. Verify real indicator creation/update and stored values in an isolated browser fixture; retain and run the full SmokeTest, save layout evidence and record failures/passes. Reuse dependencies and preserve earlier student work, account/decision IDs and report.md. No backend/trading change, installation, commit or push.

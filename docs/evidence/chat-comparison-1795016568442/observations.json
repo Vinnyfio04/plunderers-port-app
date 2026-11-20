@@ -1,0 +1,1267 @@
+[
+  {
+    "question": "What does WAIT mean in this app?",
+    "text": "AssistantDecision rules: Buy requires an upward SMA crossover, sufficient visual evidence, reviewer acceptance, and enough paper cash for one share in the analysis check. Sell or close requires a downward SMA crossover, sufficient visual evidence, reviewer acceptance, and an existing long paper position. Hold requires an existing position and no crossover. Wait requires a flat position without an upward crossover. Neither creates an order. A comparable completed-candle SMA crossover calculation must be available; missing indicator history cannot authorize an action. Missing, unreadable, conflicting, stale, timed-out, or reviewer-rejected evidence makes an assessment ineligible.Ticker AAPL · live · chart time 2026-11-09T14:32:00ZTool 1: explain_decision_rulesArguments{\"topic\":\"What does WAIT mean in this app?\"}Returned result{\n  \"status\": \"ok\",\n  \"topic\": \"What does WAIT mean in this app?\",\n  \"advisory_only\": true,\n  \"rules\": [\n    \"Buy requires an upward SMA crossover, sufficient visual evidence, reviewer acceptance, and enough paper cash for one share in the analysis check.\",\n    \"Sell or close requires a downward SMA crossover, sufficient visual evidence, reviewer acceptance, and an existing long paper position.\",\n    \"Hold requires an existing position and no crossover. Wait requires a flat position without an upward crossover. Neither creates an order.\",\n    \"A comparable completed-candle SMA crossover calculation must be available; missing indicator history cannot authorize an action.\",\n    \"Missing, unreadable, conflicting, stale, timed-out, or reviewer-rejected evidence makes an assessment ineligible.\"\n  ]\n}",
+    "result": {
+      "status": "ok",
+      "topic": "What does WAIT mean in this app?",
+      "advisory_only": true,
+      "rules": [
+        "Buy requires an upward SMA crossover, sufficient visual evidence, reviewer acceptance, and enough paper cash for one share in the analysis check.",
+        "Sell or close requires a downward SMA crossover, sufficient visual evidence, reviewer acceptance, and an existing long paper position.",
+        "Hold requires an existing position and no crossover. Wait requires a flat position without an upward crossover. Neither creates an order.",
+        "A comparable completed-candle SMA crossover calculation must be available; missing indicator history cannot authorize an action.",
+        "Missing, unreadable, conflicting, stale, timed-out, or reviewer-rejected evidence makes an assessment ineligible."
+      ]
+    }
+  },
+  {
+    "question": "Run the decision on the chart I'm looking at. What do you recommend?",
+    "text": "AssistantAAPL at 2026-11-09T14:32:00Z: the chart assessment returned wait with probability 82%. Python crossover: downward; reviewer: accept. Final check: passed.  This is advisory only.Ticker AAPL · live · chart time 2026-11-09T14:32:00Z · choice wait · probability 82%Tool 1: assess_current_chartArguments{\"compare_with_previous\":false}Returned result{\n  \"status\": \"ok\",\n  \"data_mode\": \"live\",\n  \"ticker\": \"AAPL\",\n  \"interval\": \"1m\",\n  \"chart_time\": \"2026-11-09T14:32:00Z\",\n  \"snapshot_id\": \"snap_c6f6555f5a5e4448b32db182b186305e\",\n  \"choice\": \"wait\",\n  \"probability\": 0.82,\n  \"python_crossover\": \"downward\",\n  \"reviewer_verdict\": \"accept\",\n  \"eligible_for_automation\": true,\n  \"capture_url\": \"/api/decisions/dec_b0de58640f5c469aa617830e7c193b6f/capture\",\n  \"decision\": {\n    \"decision_id\": \"dec_b0de58640f5c469aa617830e7c193b6f\",\n    \"snapshot\": {\n      \"candles\": [\n        {\n          \"close\": 10,\n          \"high\": 11,\n          \"low\": 9,\n          \"open\": 9,\n          \"timestamp\": \"2026-11-09T14:30:00Z\",\n          \"volume\": 100\n        },\n        {\n          \"close\": 12,\n          \"high\": 13,\n          \"low\": 10,\n          \"open\": 10,\n          \"timestamp\": \"2026-11-09T14:31:00Z\",\n          \"volume\": 100\n        },\n        {\n          \"close\": 9,\n          \"high\": 12,\n          \"low\": 8,\n          \"open\": 12,\n          \"timestamp\": \"2026-11-09T14:32:00Z\",\n          \"volume\": 100\n        }\n      ],\n      \"chart_range\": {\n        \"candles\": 3,\n        \"end\": \"2026-11-09T14:32:00Z\",\n        \"start\": \"2026-11-09T14:30:00Z\"\n      },\n      \"cutoff\": \"2026-11-09T14:32:00Z\",\n      \"indicators\": [\n        {\n          \"created_at_utc\": \"2026-11-18T15:42:48.482882Z\",\n          \"indicator_id\": 1,\n          \"name\": \"Fast SMA\",\n          \"settings\": {\n            \"window\": 1\n          },\n          \"symbol\": \"AAPL\",\n          \"timeframe\": \"1m\",\n          \"type\": \"sma\",\n          \"units\": \"price\",\n          \"values\": [\n            {\n              \"timestamp\": \"2026-11-09T14:30:00Z\",\n              \"value\": 10\n            },\n            {\n              \"timestamp\": \"2026-11-09T14:31:00Z\",\n              \"value\": 12\n            },\n            {\n              \"timestamp\": \"2026-11-09T14:32:00Z\",\n              \"value\": 9\n            }\n          ]\n        },\n        {\n          \"created_at_utc\": \"2026-11-18T15:42:49.289971Z\",\n          \"indicator_id\": 2,\n          \"name\": \"Slow SMA\",\n          \"settings\": {\n            \"window\": 2\n          },\n          \"symbol\": \"AAPL\",\n          \"timeframe\": \"1m\",\n          \"type\": \"sma\",\n          \"units\": \"price\",\n          \"values\": [\n            {\n              \"timestamp\": \"2026-11-09T14:30:00Z\",\n              \"value\": null\n            },\n            {\n              \"timestamp\": \"2026-11-09T14:31:00Z\",\n              \"value\": 11\n            },\n            {\n              \"timestamp\": \"2026-11-09T14:32:00Z\",\n              \"value\": 10.5\n            }\n          ]\n        }\n      ],\n      \"interval\": \"1m\",\n      \"paper_position\": {\n        \"account_id\": 1,\n        \"average_cost\": null,\n        \"cash\": 1000,\n        \"order_count\": 0,\n        \"shares\": 0\n      },\n      \"python_crossover\": {\n        \"available\": true,\n        \"current\": {\n          \"fast\": 9,\n          \"slow\": 10.5,\n          \"timestamp\": \"2026-11-09T14:32:00Z\"\n        },\n        \"fast\": \"Fast SMA\",\n        \"previous\": {\n          \"fast\": 12,\n          \"slow\": 11,\n          \"timestamp\": \"2026-11-09T14:31:00Z\"\n        },\n        \"signal\": \"downward\",\n        \"slow\": \"Slow SMA\"\n      },\n      \"snapshot_id\": \"snap_c6f6555f5a5e4448b32db182b186305e\",\n      \"symbol\": \"AAPL\"\n    },\n    \"questions\": [\n      {\n        \"type\": \"choice\",\n        \"name\": \"action\",\n        \"instructions\": \"Which action fits this paper position and the strategy rules? Buy adds shares, sell reduces the position, hold keeps an open position, wait stays flat, and close exits the entire position.\",\n        \"choices\": [\n          {\n            \"value\": \"buy\",\n            \"description\": \"Add whole shares.\"\n          },\n          {\n            \"value\": \"sell\",\n            \"description\": \"Reduce an open long position.\"\n          },\n          {\n            \"value\": \"hold\",\n            \"description\": \"Keep an open position unchanged.\"\n          },\n          {\n            \"value\": \"wait\",\n            \"description\": \"Stay flat with no position.\"\n          },\n          {\n            \"value\": \"close\",\n            \"description\": \"Exit the entire open position.\"\n          }\n        ]\n      },\n      {\n        \"type\": \"choice\",\n        \"name\": \"crossover\",\n        \"instructions\": \"At the selected candle, is an upward crossover, a downward crossover, or no crossover visible? Choose unreadable if the image cannot be assessed.\",\n        \"choices\": [\n          {\n            \"value\": \"upward\",\n            \"description\": \"Fast SMA crossed above slow SMA.\"\n          },\n          {\n            \"value\": \"downward\",\n            \"description\": \"Fast SMA crossed below slow SMA.\"\n          },\n          {\n            \"value\": \"none\",\n            \"description\": \"No crossover is visible at the cutoff.\"\n          },\n          {\n            \"value\": \"unreadable\",\n            \"description\": \"The chart cannot be read reliably.\"\n          }\n        ]\n      },\n      {\n        \"type\": \"choice\",\n        \"name\": \"evidence\",\n        \"instructions\": \"Is the visible chart sufficient to assess the signal at the cutoff?\",\n        \"choices\": [\n          {\n            \"value\": \"sufficient\",\n            \"description\": \"The visible chart is sufficient.\"\n          },\n          {\n            \"value\": \"insufficient\",\n            \"description\": \"More visible history or detail is needed.\"\n          },\n          {\n            \"value\": \"unreadable\",\n            \"description\": \"The image cannot be read.\"\n          }\n        ]\n      }\n    ],\n    \"answers\": [\n      {\n        \"type\": \"choice\",\n        \"name\": \"action\",\n        \"choice\": \"wait\",\n        \"probability\": 0.82\n      },\n      {\n        \"type\": \"choice\",\n        \"name\": \"crossover\",\n        \"choice\": \"downward\"\n      },\n      {\n        \"type\": \"choice\",\n        \"name\": \"evidence\",\n        \"choice\": \"sufficient\"\n      }\n    ],\n    \"provider\": \"test\",\n    \"model\": \"smoke-model\",\n    \"image\": {\n      \"mime_type\": \"image/png\",\n      \"width\": 1000,\n      \"height\": 576,\n      \"sha256\": \"99b56fe8774bfc97f73b06b4b24dc8e7b6c63ea8c79116289c878476986dc37c\"\n    },\n    \"capture_url\": \"/api/decisions/dec_b0de58640f5c469aa617830e7c193b6f/capture\",\n    \"eligible_for_automation\": true,\n    \"eligibility_reasons\": [],\n    \"paper_orders_unchanged\": true,\n    \"reviewer_model\": \"smoke-model\",\n    \"review_questions\": [\n      {\n        \"type\": \"choice\",\n        \"name\": \"verdict\",\n        \"instructions\": \"Review the analyst's actual action and chart answers against the frozen snapshot and backend facts. Accept only when the image supports the signal, the action follows the simple SMA strategy, and the paper account can support at least one share when buying.\",\n        \"choices\": [\n          {\n            \"value\": \"accept\",\n            \"description\": \"Proposal is supported.\"\n          },\n          {\n            \"value\": \"reject_insufficient_cash\",\n            \"description\": \"Cannot afford one share.\"\n          },\n          {\n            \"value\": \"reject_unsupported_signal\",\n            \"description\": \"Signal or action is unsupported.\"\n          },\n          {\n            \"value\": \"reject_insufficient_evidence\",\n            \"description\": \"Chart evidence is inadequate.\"\n          },\n          {\n            \"value\": \"reject_other\",\n            \"description\": \"Another issue prevents acceptance.\"\n          }\n        ]\n      }\n    ],\n    \"reviewer_answers\": [\n      {\n        \"type\": \"choice\",\n        \"name\": \"verdict\",\n        \"choice\": \"accept\"\n      }\n    ],\n    \"final_check\": {\n      \"action\": \"wait\",\n      \"reviewer_verdict\": \"accept\",\n      \"facts\": {\n        \"symbol\": \"AAPL\",\n        \"cutoff\": \"2026-11-09T14:32:00Z\",\n        \"price\": 9,\n        \"cash\": 1000,\n        \"shares\": 0,\n        \"one_share_affordable\": true,\n        \"python_crossover\": {\n          \"available\": true,\n          \"current\": {\n            \"fast\": 9,\n            \"slow\": 10.5,\n            \"timestamp\": \"2026-11-09T14:32:00Z\"\n          },\n          \"fast\": \"Fast SMA\",\n          \"previous\": {\n            \"fast\": 12,\n            \"slow\": 11,\n            \"timestamp\": \"2026-11-09T14:31:00Z\"\n          },\n          \"signal\": \"downward\",\n          \"slow\": \"Slow SMA\"\n        }\n      },\n      \"rules_passed\": true,\n      \"passed\": true\n    },\n    \"analyst_error\": null,\n    \"reviewer_error\": null\n  }\n}",
+    "result": {
+      "status": "ok",
+      "data_mode": "live",
+      "ticker": "AAPL",
+      "interval": "1m",
+      "chart_time": "2026-11-09T14:32:00Z",
+      "snapshot_id": "snap_c6f6555f5a5e4448b32db182b186305e",
+      "choice": "wait",
+      "probability": 0.82,
+      "python_crossover": "downward",
+      "reviewer_verdict": "accept",
+      "eligible_for_automation": true,
+      "capture_url": "/api/decisions/dec_b0de58640f5c469aa617830e7c193b6f/capture",
+      "decision": {
+        "decision_id": "dec_b0de58640f5c469aa617830e7c193b6f",
+        "snapshot": {
+          "candles": [
+            {
+              "close": 10,
+              "high": 11,
+              "low": 9,
+              "open": 9,
+              "timestamp": "2026-11-09T14:30:00Z",
+              "volume": 100
+            },
+            {
+              "close": 12,
+              "high": 13,
+              "low": 10,
+              "open": 10,
+              "timestamp": "2026-11-09T14:31:00Z",
+              "volume": 100
+            },
+            {
+              "close": 9,
+              "high": 12,
+              "low": 8,
+              "open": 12,
+              "timestamp": "2026-11-09T14:32:00Z",
+              "volume": 100
+            }
+          ],
+          "chart_range": {
+            "candles": 3,
+            "end": "2026-11-09T14:32:00Z",
+            "start": "2026-11-09T14:30:00Z"
+          },
+          "cutoff": "2026-11-09T14:32:00Z",
+          "indicators": [
+            {
+              "created_at_utc": "2026-11-18T15:42:48.482882Z",
+              "indicator_id": 1,
+              "name": "Fast SMA",
+              "settings": {
+                "window": 1
+              },
+              "symbol": "AAPL",
+              "timeframe": "1m",
+              "type": "sma",
+              "units": "price",
+              "values": [
+                {
+                  "timestamp": "2026-11-09T14:30:00Z",
+                  "value": 10
+                },
+                {
+                  "timestamp": "2026-11-09T14:31:00Z",
+                  "value": 12
+                },
+                {
+                  "timestamp": "2026-11-09T14:32:00Z",
+                  "value": 9
+                }
+              ]
+            },
+            {
+              "created_at_utc": "2026-11-18T15:42:49.289971Z",
+              "indicator_id": 2,
+              "name": "Slow SMA",
+              "settings": {
+                "window": 2
+              },
+              "symbol": "AAPL",
+              "timeframe": "1m",
+              "type": "sma",
+              "units": "price",
+              "values": [
+                {
+                  "timestamp": "2026-11-09T14:30:00Z",
+                  "value": null
+                },
+                {
+                  "timestamp": "2026-11-09T14:31:00Z",
+                  "value": 11
+                },
+                {
+                  "timestamp": "2026-11-09T14:32:00Z",
+                  "value": 10.5
+                }
+              ]
+            }
+          ],
+          "interval": "1m",
+          "paper_position": {
+            "account_id": 1,
+            "average_cost": null,
+            "cash": 1000,
+            "order_count": 0,
+            "shares": 0
+          },
+          "python_crossover": {
+            "available": true,
+            "current": {
+              "fast": 9,
+              "slow": 10.5,
+              "timestamp": "2026-11-09T14:32:00Z"
+            },
+            "fast": "Fast SMA",
+            "previous": {
+              "fast": 12,
+              "slow": 11,
+              "timestamp": "2026-11-09T14:31:00Z"
+            },
+            "signal": "downward",
+            "slow": "Slow SMA"
+          },
+          "snapshot_id": "snap_c6f6555f5a5e4448b32db182b186305e",
+          "symbol": "AAPL"
+        },
+        "questions": [
+          {
+            "type": "choice",
+            "name": "action",
+            "instructions": "Which action fits this paper position and the strategy rules? Buy adds shares, sell reduces the position, hold keeps an open position, wait stays flat, and close exits the entire position.",
+            "choices": [
+              {
+                "value": "buy",
+                "description": "Add whole shares."
+              },
+              {
+                "value": "sell",
+                "description": "Reduce an open long position."
+              },
+              {
+                "value": "hold",
+                "description": "Keep an open position unchanged."
+              },
+              {
+                "value": "wait",
+                "description": "Stay flat with no position."
+              },
+              {
+                "value": "close",
+                "description": "Exit the entire open position."
+              }
+            ]
+          },
+          {
+            "type": "choice",
+            "name": "crossover",
+            "instructions": "At the selected candle, is an upward crossover, a downward crossover, or no crossover visible? Choose unreadable if the image cannot be assessed.",
+            "choices": [
+              {
+                "value": "upward",
+                "description": "Fast SMA crossed above slow SMA."
+              },
+              {
+                "value": "downward",
+                "description": "Fast SMA crossed below slow SMA."
+              },
+              {
+                "value": "none",
+                "description": "No crossover is visible at the cutoff."
+              },
+              {
+                "value": "unreadable",
+                "description": "The chart cannot be read reliably."
+              }
+            ]
+          },
+          {
+            "type": "choice",
+            "name": "evidence",
+            "instructions": "Is the visible chart sufficient to assess the signal at the cutoff?",
+            "choices": [
+              {
+                "value": "sufficient",
+                "description": "The visible chart is sufficient."
+              },
+              {
+                "value": "insufficient",
+                "description": "More visible history or detail is needed."
+              },
+              {
+                "value": "unreadable",
+                "description": "The image cannot be read."
+              }
+            ]
+          }
+        ],
+        "answers": [
+          {
+            "type": "choice",
+            "name": "action",
+            "choice": "wait",
+            "probability": 0.82
+          },
+          {
+            "type": "choice",
+            "name": "crossover",
+            "choice": "downward"
+          },
+          {
+            "type": "choice",
+            "name": "evidence",
+            "choice": "sufficient"
+          }
+        ],
+        "provider": "test",
+        "model": "smoke-model",
+        "image": {
+          "mime_type": "image/png",
+          "width": 1000,
+          "height": 576,
+          "sha256": "99b56fe8774bfc97f73b06b4b24dc8e7b6c63ea8c79116289c878476986dc37c"
+        },
+        "capture_url": "/api/decisions/dec_b0de58640f5c469aa617830e7c193b6f/capture",
+        "eligible_for_automation": true,
+        "eligibility_reasons": [],
+        "paper_orders_unchanged": true,
+        "reviewer_model": "smoke-model",
+        "review_questions": [
+          {
+            "type": "choice",
+            "name": "verdict",
+            "instructions": "Review the analyst's actual action and chart answers against the frozen snapshot and backend facts. Accept only when the image supports the signal, the action follows the simple SMA strategy, and the paper account can support at least one share when buying.",
+            "choices": [
+              {
+                "value": "accept",
+                "description": "Proposal is supported."
+              },
+              {
+                "value": "reject_insufficient_cash",
+                "description": "Cannot afford one share."
+              },
+              {
+                "value": "reject_unsupported_signal",
+                "description": "Signal or action is unsupported."
+              },
+              {
+                "value": "reject_insufficient_evidence",
+                "description": "Chart evidence is inadequate."
+              },
+              {
+                "value": "reject_other",
+                "description": "Another issue prevents acceptance."
+              }
+            ]
+          }
+        ],
+        "reviewer_answers": [
+          {
+            "type": "choice",
+            "name": "verdict",
+            "choice": "accept"
+          }
+        ],
+        "final_check": {
+          "action": "wait",
+          "reviewer_verdict": "accept",
+          "facts": {
+            "symbol": "AAPL",
+            "cutoff": "2026-11-09T14:32:00Z",
+            "price": 9,
+            "cash": 1000,
+            "shares": 0,
+            "one_share_affordable": true,
+            "python_crossover": {
+              "available": true,
+              "current": {
+                "fast": 9,
+                "slow": 10.5,
+                "timestamp": "2026-11-09T14:32:00Z"
+              },
+              "fast": "Fast SMA",
+              "previous": {
+                "fast": 12,
+                "slow": 11,
+                "timestamp": "2026-11-09T14:31:00Z"
+              },
+              "signal": "downward",
+              "slow": "Slow SMA"
+            }
+          },
+          "rules_passed": true,
+          "passed": true
+        },
+        "analyst_error": null,
+        "reviewer_error": null
+      }
+    }
+  },
+  {
+    "question": "Run a new decision for this chart and compare it with the earlier assessment.",
+    "text": "AssistantAAPL at 2026-11-09T14:33:00Z: the chart assessment returned buy with probability 91%. Python crossover: upward; reviewer: accept. Final check: passed.  Comparison (AAPL, live): earlier chart 2026-11-09T14:32:00Z returned wait with probability 82%; new chart 2026-11-09T14:33:00Z returned buy with probability 91%. This is advisory only.Ticker AAPL · live · chart time 2026-11-09T14:33:00Z · choice buy · probability 91%Tool 1: assess_current_chartArguments{\"compare_with_previous\":true}Returned result{\n  \"status\": \"ok\",\n  \"data_mode\": \"live\",\n  \"ticker\": \"AAPL\",\n  \"interval\": \"1m\",\n  \"chart_time\": \"2026-11-09T14:33:00Z\",\n  \"snapshot_id\": \"snap_5ccd6463d4464b959f4a65d37a2a6487\",\n  \"choice\": \"buy\",\n  \"probability\": 0.91,\n  \"python_crossover\": \"upward\",\n  \"reviewer_verdict\": \"accept\",\n  \"eligible_for_automation\": true,\n  \"capture_url\": \"/api/decisions/dec_e6dc0687e379438baac2f291c63d3bc5/capture\",\n  \"decision\": {\n    \"decision_id\": \"dec_e6dc0687e379438baac2f291c63d3bc5\",\n    \"snapshot\": {\n      \"candles\": [\n        {\n          \"close\": 10,\n          \"high\": 11,\n          \"low\": 9,\n          \"open\": 9,\n          \"timestamp\": \"2026-11-09T14:30:00Z\",\n          \"volume\": 100\n        },\n        {\n          \"close\": 12,\n          \"high\": 13,\n          \"low\": 10,\n          \"open\": 10,\n          \"timestamp\": \"2026-11-09T14:31:00Z\",\n          \"volume\": 100\n        },\n        {\n          \"close\": 9,\n          \"high\": 12,\n          \"low\": 8,\n          \"open\": 12,\n          \"timestamp\": \"2026-11-09T14:32:00Z\",\n          \"volume\": 100\n        },\n        {\n          \"close\": 13,\n          \"high\": 14,\n          \"low\": 8,\n          \"open\": 9,\n          \"timestamp\": \"2026-11-09T14:33:00Z\",\n          \"volume\": 100\n        }\n      ],\n      \"chart_range\": {\n        \"candles\": 4,\n        \"end\": \"2026-11-09T14:33:00Z\",\n        \"start\": \"2026-11-09T14:30:00Z\"\n      },\n      \"cutoff\": \"2026-11-09T14:33:00Z\",\n      \"indicators\": [\n        {\n          \"created_at_utc\": \"2026-11-18T15:42:48.482882Z\",\n          \"indicator_id\": 1,\n          \"name\": \"Fast SMA\",\n          \"settings\": {\n            \"window\": 1\n          },\n          \"symbol\": \"AAPL\",\n          \"timeframe\": \"1m\",\n          \"type\": \"sma\",\n          \"units\": \"price\",\n          \"values\": [\n            {\n              \"timestamp\": \"2026-11-09T14:30:00Z\",\n              \"value\": 10\n            },\n            {\n              \"timestamp\": \"2026-11-09T14:31:00Z\",\n              \"value\": 12\n            },\n            {\n              \"timestamp\": \"2026-11-09T14:32:00Z\",\n              \"value\": 9\n            },\n            {\n              \"timestamp\": \"2026-11-09T14:33:00Z\",\n              \"value\": 13\n            }\n          ]\n        },\n        {\n          \"created_at_utc\": \"2026-11-18T15:42:49.289971Z\",\n          \"indicator_id\": 2,\n          \"name\": \"Slow SMA\",\n          \"settings\": {\n            \"window\": 2\n          },\n          \"symbol\": \"AAPL\",\n          \"timeframe\": \"1m\",\n          \"type\": \"sma\",\n          \"units\": \"price\",\n          \"values\": [\n            {\n              \"timestamp\": \"2026-11-09T14:30:00Z\",\n              \"value\": null\n            },\n            {\n              \"timestamp\": \"2026-11-09T14:31:00Z\",\n              \"value\": 11\n            },\n            {\n              \"timestamp\": \"2026-11-09T14:32:00Z\",\n              \"value\": 10.5\n            },\n            {\n              \"timestamp\": \"2026-11-09T14:33:00Z\",\n              \"value\": 11\n            }\n          ]\n        }\n      ],\n      \"interval\": \"1m\",\n      \"paper_position\": {\n        \"account_id\": 1,\n        \"average_cost\": null,\n        \"cash\": 1000,\n        \"order_count\": 0,\n        \"shares\": 0\n      },\n      \"python_crossover\": {\n        \"available\": true,\n        \"current\": {\n          \"fast\": 13,\n          \"slow\": 11,\n          \"timestamp\": \"2026-11-09T14:33:00Z\"\n        },\n        \"fast\": \"Fast SMA\",\n        \"previous\": {\n          \"fast\": 9,\n          \"slow\": 10.5,\n          \"timestamp\": \"2026-11-09T14:32:00Z\"\n        },\n        \"signal\": \"upward\",\n        \"slow\": \"Slow SMA\"\n      },\n      \"snapshot_id\": \"snap_5ccd6463d4464b959f4a65d37a2a6487\",\n      \"symbol\": \"AAPL\"\n    },\n    \"questions\": [\n      {\n        \"type\": \"choice\",\n        \"name\": \"action\",\n        \"instructions\": \"Which action fits this paper position and the strategy rules? Buy adds shares, sell reduces the position, hold keeps an open position, wait stays flat, and close exits the entire position.\",\n        \"choices\": [\n          {\n            \"value\": \"buy\",\n            \"description\": \"Add whole shares.\"\n          },\n          {\n            \"value\": \"sell\",\n            \"description\": \"Reduce an open long position.\"\n          },\n          {\n            \"value\": \"hold\",\n            \"description\": \"Keep an open position unchanged.\"\n          },\n          {\n            \"value\": \"wait\",\n            \"description\": \"Stay flat with no position.\"\n          },\n          {\n            \"value\": \"close\",\n            \"description\": \"Exit the entire open position.\"\n          }\n        ]\n      },\n      {\n        \"type\": \"choice\",\n        \"name\": \"crossover\",\n        \"instructions\": \"At the selected candle, is an upward crossover, a downward crossover, or no crossover visible? Choose unreadable if the image cannot be assessed.\",\n        \"choices\": [\n          {\n            \"value\": \"upward\",\n            \"description\": \"Fast SMA crossed above slow SMA.\"\n          },\n          {\n            \"value\": \"downward\",\n            \"description\": \"Fast SMA crossed below slow SMA.\"\n          },\n          {\n            \"value\": \"none\",\n            \"description\": \"No crossover is visible at the cutoff.\"\n          },\n          {\n            \"value\": \"unreadable\",\n            \"description\": \"The chart cannot be read reliably.\"\n          }\n        ]\n      },\n      {\n        \"type\": \"choice\",\n        \"name\": \"evidence\",\n        \"instructions\": \"Is the visible chart sufficient to assess the signal at the cutoff?\",\n        \"choices\": [\n          {\n            \"value\": \"sufficient\",\n            \"description\": \"The visible chart is sufficient.\"\n          },\n          {\n            \"value\": \"insufficient\",\n            \"description\": \"More visible history or detail is needed.\"\n          },\n          {\n            \"value\": \"unreadable\",\n            \"description\": \"The image cannot be read.\"\n          }\n        ]\n      }\n    ],\n    \"answers\": [\n      {\n        \"type\": \"choice\",\n        \"name\": \"action\",\n        \"choice\": \"buy\",\n        \"probability\": 0.91\n      },\n      {\n        \"type\": \"choice\",\n        \"name\": \"crossover\",\n        \"choice\": \"upward\"\n      },\n      {\n        \"type\": \"choice\",\n        \"name\": \"evidence\",\n        \"choice\": \"sufficient\"\n      }\n    ],\n    \"provider\": \"test\",\n    \"model\": \"smoke-model\",\n    \"image\": {\n      \"mime_type\": \"image/png\",\n      \"width\": 1000,\n      \"height\": 576,\n      \"sha256\": \"dd3af38286a51d3033109dfb8859c0da615236cd9e2baa44a92a55155a061fe1\"\n    },\n    \"capture_url\": \"/api/decisions/dec_e6dc0687e379438baac2f291c63d3bc5/capture\",\n    \"eligible_for_automation\": true,\n    \"eligibility_reasons\": [],\n    \"paper_orders_unchanged\": true,\n    \"reviewer_model\": \"smoke-model\",\n    \"review_questions\": [\n      {\n        \"type\": \"choice\",\n        \"name\": \"verdict\",\n        \"instructions\": \"Review the analyst's actual action and chart answers against the frozen snapshot and backend facts. Accept only when the image supports the signal, the action follows the simple SMA strategy, and the paper account can support at least one share when buying.\",\n        \"choices\": [\n          {\n            \"value\": \"accept\",\n            \"description\": \"Proposal is supported.\"\n          },\n          {\n            \"value\": \"reject_insufficient_cash\",\n            \"description\": \"Cannot afford one share.\"\n          },\n          {\n            \"value\": \"reject_unsupported_signal\",\n            \"description\": \"Signal or action is unsupported.\"\n          },\n          {\n            \"value\": \"reject_insufficient_evidence\",\n            \"description\": \"Chart evidence is inadequate.\"\n          },\n          {\n            \"value\": \"reject_other\",\n            \"description\": \"Another issue prevents acceptance.\"\n          }\n        ]\n      }\n    ],\n    \"reviewer_answers\": [\n      {\n        \"type\": \"choice\",\n        \"name\": \"verdict\",\n        \"choice\": \"accept\"\n      }\n    ],\n    \"final_check\": {\n      \"action\": \"buy\",\n      \"reviewer_verdict\": \"accept\",\n      \"facts\": {\n        \"symbol\": \"AAPL\",\n        \"cutoff\": \"2026-11-09T14:33:00Z\",\n        \"price\": 13,\n        \"cash\": 1000,\n        \"shares\": 0,\n        \"one_share_affordable\": true,\n        \"python_crossover\": {\n          \"available\": true,\n          \"current\": {\n            \"fast\": 13,\n            \"slow\": 11,\n            \"timestamp\": \"2026-11-09T14:33:00Z\"\n          },\n          \"fast\": \"Fast SMA\",\n          \"previous\": {\n            \"fast\": 9,\n            \"slow\": 10.5,\n            \"timestamp\": \"2026-11-09T14:32:00Z\"\n          },\n          \"signal\": \"upward\",\n          \"slow\": \"Slow SMA\"\n        }\n      },\n      \"rules_passed\": true,\n      \"passed\": true\n    },\n    \"analyst_error\": null,\n    \"reviewer_error\": null\n  },\n  \"previous_assessment\": {\n    \"status\": \"ok\",\n    \"data_mode\": \"live\",\n    \"ticker\": \"AAPL\",\n    \"interval\": \"1m\",\n    \"chart_time\": \"2026-11-09T14:32:00Z\",\n    \"snapshot_id\": \"snap_c6f6555f5a5e4448b32db182b186305e\",\n    \"choice\": \"wait\",\n    \"probability\": 0.82,\n    \"python_crossover\": \"downward\",\n    \"reviewer_verdict\": \"accept\",\n    \"eligible_for_automation\": true,\n    \"capture_url\": \"/api/decisions/dec_b0de58640f5c469aa617830e7c193b6f/capture\",\n    \"decision\": {\n      \"decision_id\": \"dec_b0de58640f5c469aa617830e7c193b6f\",\n      \"snapshot\": {\n        \"candles\": [\n          {\n            \"close\": 10,\n            \"high\": 11,\n            \"low\": 9,\n            \"open\": 9,\n            \"timestamp\": \"2026-11-09T14:30:00Z\",\n            \"volume\": 100\n          },\n          {\n            \"close\": 12,\n            \"high\": 13,\n            \"low\": 10,\n            \"open\": 10,\n            \"timestamp\": \"2026-11-09T14:31:00Z\",\n            \"volume\": 100\n          },\n          {\n            \"close\": 9,\n            \"high\": 12,\n            \"low\": 8,\n            \"open\": 12,\n            \"timestamp\": \"2026-11-09T14:32:00Z\",\n            \"volume\": 100\n          }\n        ],\n        \"chart_range\": {\n          \"candles\": 3,\n          \"end\": \"2026-11-09T14:32:00Z\",\n          \"start\": \"2026-11-09T14:30:00Z\"\n        },\n        \"cutoff\": \"2026-11-09T14:32:00Z\",\n        \"indicators\": [\n          {\n            \"created_at_utc\": \"2026-11-18T15:42:48.482882Z\",\n            \"indicator_id\": 1,\n            \"name\": \"Fast SMA\",\n            \"settings\": {\n              \"window\": 1\n            },\n            \"symbol\": \"AAPL\",\n            \"timeframe\": \"1m\",\n            \"type\": \"sma\",\n            \"units\": \"price\",\n            \"values\": [\n              {\n                \"timestamp\": \"2026-11-09T14:30:00Z\",\n                \"value\": 10\n              },\n              {\n                \"timestamp\": \"2026-11-09T14:31:00Z\",\n                \"value\": 12\n              },\n              {\n                \"timestamp\": \"2026-11-09T14:32:00Z\",\n                \"value\": 9\n              }\n            ]\n          },\n          {\n            \"created_at_utc\": \"2026-11-18T15:42:49.289971Z\",\n            \"indicator_id\": 2,\n            \"name\": \"Slow SMA\",\n            \"settings\": {\n              \"window\": 2\n            },\n            \"symbol\": \"AAPL\",\n            \"timeframe\": \"1m\",\n            \"type\": \"sma\",\n            \"units\": \"price\",\n            \"values\": [\n              {\n                \"timestamp\": \"2026-11-09T14:30:00Z\",\n                \"value\": null\n              },\n              {\n                \"timestamp\": \"2026-11-09T14:31:00Z\",\n                \"value\": 11\n              },\n              {\n                \"timestamp\": \"2026-11-09T14:32:00Z\",\n                \"value\": 10.5\n              }\n            ]\n          }\n        ],\n        \"interval\": \"1m\",\n        \"paper_position\": {\n          \"account_id\": 1,\n          \"average_cost\": null,\n          \"cash\": 1000,\n          \"order_count\": 0,\n          \"shares\": 0\n        },\n        \"python_crossover\": {\n          \"available\": true,\n          \"current\": {\n            \"fast\": 9,\n            \"slow\": 10.5,\n            \"timestamp\": \"2026-11-09T14:32:00Z\"\n          },\n          \"fast\": \"Fast SMA\",\n          \"previous\": {\n            \"fast\": 12,\n            \"slow\": 11,\n            \"timestamp\": \"2026-11-09T14:31:00Z\"\n          },\n          \"signal\": \"downward\",\n          \"slow\": \"Slow SMA\"\n        },\n        \"snapshot_id\": \"snap_c6f6555f5a5e4448b32db182b186305e\",\n        \"symbol\": \"AAPL\"\n      },\n      \"questions\": [\n        {\n          \"type\": \"choice\",\n          \"name\": \"action\",\n          \"instructions\": \"Which action fits this paper position and the strategy rules? Buy adds shares, sell reduces the position, hold keeps an open position, wait stays flat, and close exits the entire position.\",\n          \"choices\": [\n            {\n              \"value\": \"buy\",\n              \"description\": \"Add whole shares.\"\n            },\n            {\n              \"value\": \"sell\",\n              \"description\": \"Reduce an open long position.\"\n            },\n            {\n              \"value\": \"hold\",\n              \"description\": \"Keep an open position unchanged.\"\n            },\n            {\n              \"value\": \"wait\",\n              \"description\": \"Stay flat with no position.\"\n            },\n            {\n              \"value\": \"close\",\n              \"description\": \"Exit the entire open position.\"\n            }\n          ]\n        },\n        {\n          \"type\": \"choice\",\n          \"name\": \"crossover\",\n          \"instructions\": \"At the selected candle, is an upward crossover, a downward crossover, or no crossover visible? Choose unreadable if the image cannot be assessed.\",\n          \"choices\": [\n            {\n              \"value\": \"upward\",\n              \"description\": \"Fast SMA crossed above slow SMA.\"\n            },\n            {\n              \"value\": \"downward\",\n              \"description\": \"Fast SMA crossed below slow SMA.\"\n            },\n            {\n              \"value\": \"none\",\n              \"description\": \"No crossover is visible at the cutoff.\"\n            },\n            {\n              \"value\": \"unreadable\",\n              \"description\": \"The chart cannot be read reliably.\"\n            }\n          ]\n        },\n        {\n          \"type\": \"choice\",\n          \"name\": \"evidence\",\n          \"instructions\": \"Is the visible chart sufficient to assess the signal at the cutoff?\",\n          \"choices\": [\n            {\n              \"value\": \"sufficient\",\n              \"description\": \"The visible chart is sufficient.\"\n            },\n            {\n              \"value\": \"insufficient\",\n              \"description\": \"More visible history or detail is needed.\"\n            },\n            {\n              \"value\": \"unreadable\",\n              \"description\": \"The image cannot be read.\"\n            }\n          ]\n        }\n      ],\n      \"answers\": [\n        {\n          \"type\": \"choice\",\n          \"name\": \"action\",\n          \"choice\": \"wait\",\n          \"probability\": 0.82\n        },\n        {\n          \"type\": \"choice\",\n          \"name\": \"crossover\",\n          \"choice\": \"downward\"\n        },\n        {\n          \"type\": \"choice\",\n          \"name\": \"evidence\",\n          \"choice\": \"sufficient\"\n        }\n      ],\n      \"provider\": \"test\",\n      \"model\": \"smoke-model\",\n      \"image\": {\n        \"mime_type\": \"image/png\",\n        \"width\": 1000,\n        \"height\": 576,\n        \"sha256\": \"99b56fe8774bfc97f73b06b4b24dc8e7b6c63ea8c79116289c878476986dc37c\"\n      },\n      \"capture_url\": \"/api/decisions/dec_b0de58640f5c469aa617830e7c193b6f/capture\",\n      \"eligible_for_automation\": true,\n      \"eligibility_reasons\": [],\n      \"paper_orders_unchanged\": true,\n      \"reviewer_model\": \"smoke-model\",\n      \"review_questions\": [\n        {\n          \"type\": \"choice\",\n          \"name\": \"verdict\",\n          \"instructions\": \"Review the analyst's actual action and chart answers against the frozen snapshot and backend facts. Accept only when the image supports the signal, the action follows the simple SMA strategy, and the paper account can support at least one share when buying.\",\n          \"choices\": [\n            {\n              \"value\": \"accept\",\n              \"description\": \"Proposal is supported.\"\n            },\n            {\n              \"value\": \"reject_insufficient_cash\",\n              \"description\": \"Cannot afford one share.\"\n            },\n            {\n              \"value\": \"reject_unsupported_signal\",\n              \"description\": \"Signal or action is unsupported.\"\n            },\n            {\n              \"value\": \"reject_insufficient_evidence\",\n              \"description\": \"Chart evidence is inadequate.\"\n            },\n            {\n              \"value\": \"reject_other\",\n              \"description\": \"Another issue prevents acceptance.\"\n            }\n          ]\n        }\n      ],\n      \"reviewer_answers\": [\n        {\n          \"type\": \"choice\",\n          \"name\": \"verdict\",\n          \"choice\": \"accept\"\n        }\n      ],\n      \"final_check\": {\n        \"action\": \"wait\",\n        \"reviewer_verdict\": \"accept\",\n        \"facts\": {\n          \"symbol\": \"AAPL\",\n          \"cutoff\": \"2026-11-09T14:32:00Z\",\n          \"price\": 9,\n          \"cash\": 1000,\n          \"shares\": 0,\n          \"one_share_affordable\": true,\n          \"python_crossover\": {\n            \"available\": true,\n            \"current\": {\n              \"fast\": 9,\n              \"slow\": 10.5,\n              \"timestamp\": \"2026-11-09T14:32:00Z\"\n            },\n            \"fast\": \"Fast SMA\",\n            \"previous\": {\n              \"fast\": 12,\n              \"slow\": 11,\n              \"timestamp\": \"2026-11-09T14:31:00Z\"\n            },\n            \"signal\": \"downward\",\n            \"slow\": \"Slow SMA\"\n          }\n        },\n        \"rules_passed\": true,\n        \"passed\": true\n      },\n      \"analyst_error\": null,\n      \"reviewer_error\": null\n    }\n  }\n}",
+    "result": {
+      "status": "ok",
+      "data_mode": "live",
+      "ticker": "AAPL",
+      "interval": "1m",
+      "chart_time": "2026-11-09T14:33:00Z",
+      "snapshot_id": "snap_5ccd6463d4464b959f4a65d37a2a6487",
+      "choice": "buy",
+      "probability": 0.91,
+      "python_crossover": "upward",
+      "reviewer_verdict": "accept",
+      "eligible_for_automation": true,
+      "capture_url": "/api/decisions/dec_e6dc0687e379438baac2f291c63d3bc5/capture",
+      "decision": {
+        "decision_id": "dec_e6dc0687e379438baac2f291c63d3bc5",
+        "snapshot": {
+          "candles": [
+            {
+              "close": 10,
+              "high": 11,
+              "low": 9,
+              "open": 9,
+              "timestamp": "2026-11-09T14:30:00Z",
+              "volume": 100
+            },
+            {
+              "close": 12,
+              "high": 13,
+              "low": 10,
+              "open": 10,
+              "timestamp": "2026-11-09T14:31:00Z",
+              "volume": 100
+            },
+            {
+              "close": 9,
+              "high": 12,
+              "low": 8,
+              "open": 12,
+              "timestamp": "2026-11-09T14:32:00Z",
+              "volume": 100
+            },
+            {
+              "close": 13,
+              "high": 14,
+              "low": 8,
+              "open": 9,
+              "timestamp": "2026-11-09T14:33:00Z",
+              "volume": 100
+            }
+          ],
+          "chart_range": {
+            "candles": 4,
+            "end": "2026-11-09T14:33:00Z",
+            "start": "2026-11-09T14:30:00Z"
+          },
+          "cutoff": "2026-11-09T14:33:00Z",
+          "indicators": [
+            {
+              "created_at_utc": "2026-11-18T15:42:48.482882Z",
+              "indicator_id": 1,
+              "name": "Fast SMA",
+              "settings": {
+                "window": 1
+              },
+              "symbol": "AAPL",
+              "timeframe": "1m",
+              "type": "sma",
+              "units": "price",
+              "values": [
+                {
+                  "timestamp": "2026-11-09T14:30:00Z",
+                  "value": 10
+                },
+                {
+                  "timestamp": "2026-11-09T14:31:00Z",
+                  "value": 12
+                },
+                {
+                  "timestamp": "2026-11-09T14:32:00Z",
+                  "value": 9
+                },
+                {
+                  "timestamp": "2026-11-09T14:33:00Z",
+                  "value": 13
+                }
+              ]
+            },
+            {
+              "created_at_utc": "2026-11-18T15:42:49.289971Z",
+              "indicator_id": 2,
+              "name": "Slow SMA",
+              "settings": {
+                "window": 2
+              },
+              "symbol": "AAPL",
+              "timeframe": "1m",
+              "type": "sma",
+              "units": "price",
+              "values": [
+                {
+                  "timestamp": "2026-11-09T14:30:00Z",
+                  "value": null
+                },
+                {
+                  "timestamp": "2026-11-09T14:31:00Z",
+                  "value": 11
+                },
+                {
+                  "timestamp": "2026-11-09T14:32:00Z",
+                  "value": 10.5
+                },
+                {
+                  "timestamp": "2026-11-09T14:33:00Z",
+                  "value": 11
+                }
+              ]
+            }
+          ],
+          "interval": "1m",
+          "paper_position": {
+            "account_id": 1,
+            "average_cost": null,
+            "cash": 1000,
+            "order_count": 0,
+            "shares": 0
+          },
+          "python_crossover": {
+            "available": true,
+            "current": {
+              "fast": 13,
+              "slow": 11,
+              "timestamp": "2026-11-09T14:33:00Z"
+            },
+            "fast": "Fast SMA",
+            "previous": {
+              "fast": 9,
+              "slow": 10.5,
+              "timestamp": "2026-11-09T14:32:00Z"
+            },
+            "signal": "upward",
+            "slow": "Slow SMA"
+          },
+          "snapshot_id": "snap_5ccd6463d4464b959f4a65d37a2a6487",
+          "symbol": "AAPL"
+        },
+        "questions": [
+          {
+            "type": "choice",
+            "name": "action",
+            "instructions": "Which action fits this paper position and the strategy rules? Buy adds shares, sell reduces the position, hold keeps an open position, wait stays flat, and close exits the entire position.",
+            "choices": [
+              {
+                "value": "buy",
+                "description": "Add whole shares."
+              },
+              {
+                "value": "sell",
+                "description": "Reduce an open long position."
+              },
+              {
+                "value": "hold",
+                "description": "Keep an open position unchanged."
+              },
+              {
+                "value": "wait",
+                "description": "Stay flat with no position."
+              },
+              {
+                "value": "close",
+                "description": "Exit the entire open position."
+              }
+            ]
+          },
+          {
+            "type": "choice",
+            "name": "crossover",
+            "instructions": "At the selected candle, is an upward crossover, a downward crossover, or no crossover visible? Choose unreadable if the image cannot be assessed.",
+            "choices": [
+              {
+                "value": "upward",
+                "description": "Fast SMA crossed above slow SMA."
+              },
+              {
+                "value": "downward",
+                "description": "Fast SMA crossed below slow SMA."
+              },
+              {
+                "value": "none",
+                "description": "No crossover is visible at the cutoff."
+              },
+              {
+                "value": "unreadable",
+                "description": "The chart cannot be read reliably."
+              }
+            ]
+          },
+          {
+            "type": "choice",
+            "name": "evidence",
+            "instructions": "Is the visible chart sufficient to assess the signal at the cutoff?",
+            "choices": [
+              {
+                "value": "sufficient",
+                "description": "The visible chart is sufficient."
+              },
+              {
+                "value": "insufficient",
+                "description": "More visible history or detail is needed."
+              },
+              {
+                "value": "unreadable",
+                "description": "The image cannot be read."
+              }
+            ]
+          }
+        ],
+        "answers": [
+          {
+            "type": "choice",
+            "name": "action",
+            "choice": "buy",
+            "probability": 0.91
+          },
+          {
+            "type": "choice",
+            "name": "crossover",
+            "choice": "upward"
+          },
+          {
+            "type": "choice",
+            "name": "evidence",
+            "choice": "sufficient"
+          }
+        ],
+        "provider": "test",
+        "model": "smoke-model",
+        "image": {
+          "mime_type": "image/png",
+          "width": 1000,
+          "height": 576,
+          "sha256": "dd3af38286a51d3033109dfb8859c0da615236cd9e2baa44a92a55155a061fe1"
+        },
+        "capture_url": "/api/decisions/dec_e6dc0687e379438baac2f291c63d3bc5/capture",
+        "eligible_for_automation": true,
+        "eligibility_reasons": [],
+        "paper_orders_unchanged": true,
+        "reviewer_model": "smoke-model",
+        "review_questions": [
+          {
+            "type": "choice",
+            "name": "verdict",
+            "instructions": "Review the analyst's actual action and chart answers against the frozen snapshot and backend facts. Accept only when the image supports the signal, the action follows the simple SMA strategy, and the paper account can support at least one share when buying.",
+            "choices": [
+              {
+                "value": "accept",
+                "description": "Proposal is supported."
+              },
+              {
+                "value": "reject_insufficient_cash",
+                "description": "Cannot afford one share."
+              },
+              {
+                "value": "reject_unsupported_signal",
+                "description": "Signal or action is unsupported."
+              },
+              {
+                "value": "reject_insufficient_evidence",
+                "description": "Chart evidence is inadequate."
+              },
+              {
+                "value": "reject_other",
+                "description": "Another issue prevents acceptance."
+              }
+            ]
+          }
+        ],
+        "reviewer_answers": [
+          {
+            "type": "choice",
+            "name": "verdict",
+            "choice": "accept"
+          }
+        ],
+        "final_check": {
+          "action": "buy",
+          "reviewer_verdict": "accept",
+          "facts": {
+            "symbol": "AAPL",
+            "cutoff": "2026-11-09T14:33:00Z",
+            "price": 13,
+            "cash": 1000,
+            "shares": 0,
+            "one_share_affordable": true,
+            "python_crossover": {
+              "available": true,
+              "current": {
+                "fast": 13,
+                "slow": 11,
+                "timestamp": "2026-11-09T14:33:00Z"
+              },
+              "fast": "Fast SMA",
+              "previous": {
+                "fast": 9,
+                "slow": 10.5,
+                "timestamp": "2026-11-09T14:32:00Z"
+              },
+              "signal": "upward",
+              "slow": "Slow SMA"
+            }
+          },
+          "rules_passed": true,
+          "passed": true
+        },
+        "analyst_error": null,
+        "reviewer_error": null
+      },
+      "previous_assessment": {
+        "status": "ok",
+        "data_mode": "live",
+        "ticker": "AAPL",
+        "interval": "1m",
+        "chart_time": "2026-11-09T14:32:00Z",
+        "snapshot_id": "snap_c6f6555f5a5e4448b32db182b186305e",
+        "choice": "wait",
+        "probability": 0.82,
+        "python_crossover": "downward",
+        "reviewer_verdict": "accept",
+        "eligible_for_automation": true,
+        "capture_url": "/api/decisions/dec_b0de58640f5c469aa617830e7c193b6f/capture",
+        "decision": {
+          "decision_id": "dec_b0de58640f5c469aa617830e7c193b6f",
+          "snapshot": {
+            "candles": [
+              {
+                "close": 10,
+                "high": 11,
+                "low": 9,
+                "open": 9,
+                "timestamp": "2026-11-09T14:30:00Z",
+                "volume": 100
+              },
+              {
+                "close": 12,
+                "high": 13,
+                "low": 10,
+                "open": 10,
+                "timestamp": "2026-11-09T14:31:00Z",
+                "volume": 100
+              },
+              {
+                "close": 9,
+                "high": 12,
+                "low": 8,
+                "open": 12,
+                "timestamp": "2026-11-09T14:32:00Z",
+                "volume": 100
+              }
+            ],
+            "chart_range": {
+              "candles": 3,
+              "end": "2026-11-09T14:32:00Z",
+              "start": "2026-11-09T14:30:00Z"
+            },
+            "cutoff": "2026-11-09T14:32:00Z",
+            "indicators": [
+              {
+                "created_at_utc": "2026-11-18T15:42:48.482882Z",
+                "indicator_id": 1,
+                "name": "Fast SMA",
+                "settings": {
+                  "window": 1
+                },
+                "symbol": "AAPL",
+                "timeframe": "1m",
+                "type": "sma",
+                "units": "price",
+                "values": [
+                  {
+                    "timestamp": "2026-11-09T14:30:00Z",
+                    "value": 10
+                  },
+                  {
+                    "timestamp": "2026-11-09T14:31:00Z",
+                    "value": 12
+                  },
+                  {
+                    "timestamp": "2026-11-09T14:32:00Z",
+                    "value": 9
+                  }
+                ]
+              },
+              {
+                "created_at_utc": "2026-11-18T15:42:49.289971Z",
+                "indicator_id": 2,
+                "name": "Slow SMA",
+                "settings": {
+                  "window": 2
+                },
+                "symbol": "AAPL",
+                "timeframe": "1m",
+                "type": "sma",
+                "units": "price",
+                "values": [
+                  {
+                    "timestamp": "2026-11-09T14:30:00Z",
+                    "value": null
+                  },
+                  {
+                    "timestamp": "2026-11-09T14:31:00Z",
+                    "value": 11
+                  },
+                  {
+                    "timestamp": "2026-11-09T14:32:00Z",
+                    "value": 10.5
+                  }
+                ]
+              }
+            ],
+            "interval": "1m",
+            "paper_position": {
+              "account_id": 1,
+              "average_cost": null,
+              "cash": 1000,
+              "order_count": 0,
+              "shares": 0
+            },
+            "python_crossover": {
+              "available": true,
+              "current": {
+                "fast": 9,
+                "slow": 10.5,
+                "timestamp": "2026-11-09T14:32:00Z"
+              },
+              "fast": "Fast SMA",
+              "previous": {
+                "fast": 12,
+                "slow": 11,
+                "timestamp": "2026-11-09T14:31:00Z"
+              },
+              "signal": "downward",
+              "slow": "Slow SMA"
+            },
+            "snapshot_id": "snap_c6f6555f5a5e4448b32db182b186305e",
+            "symbol": "AAPL"
+          },
+          "questions": [
+            {
+              "type": "choice",
+              "name": "action",
+              "instructions": "Which action fits this paper position and the strategy rules? Buy adds shares, sell reduces the position, hold keeps an open position, wait stays flat, and close exits the entire position.",
+              "choices": [
+                {
+                  "value": "buy",
+                  "description": "Add whole shares."
+                },
+                {
+                  "value": "sell",
+                  "description": "Reduce an open long position."
+                },
+                {
+                  "value": "hold",
+                  "description": "Keep an open position unchanged."
+                },
+                {
+                  "value": "wait",
+                  "description": "Stay flat with no position."
+                },
+                {
+                  "value": "close",
+                  "description": "Exit the entire open position."
+                }
+              ]
+            },
+            {
+              "type": "choice",
+              "name": "crossover",
+              "instructions": "At the selected candle, is an upward crossover, a downward crossover, or no crossover visible? Choose unreadable if the image cannot be assessed.",
+              "choices": [
+                {
+                  "value": "upward",
+                  "description": "Fast SMA crossed above slow SMA."
+                },
+                {
+                  "value": "downward",
+                  "description": "Fast SMA crossed below slow SMA."
+                },
+                {
+                  "value": "none",
+                  "description": "No crossover is visible at the cutoff."
+                },
+                {
+                  "value": "unreadable",
+                  "description": "The chart cannot be read reliably."
+                }
+              ]
+            },
+            {
+              "type": "choice",
+              "name": "evidence",
+              "instructions": "Is the visible chart sufficient to assess the signal at the cutoff?",
+              "choices": [
+                {
+                  "value": "sufficient",
+                  "description": "The visible chart is sufficient."
+                },
+                {
+                  "value": "insufficient",
+                  "description": "More visible history or detail is needed."
+                },
+                {
+                  "value": "unreadable",
+                  "description": "The image cannot be read."
+                }
+              ]
+            }
+          ],
+          "answers": [
+            {
+              "type": "choice",
+              "name": "action",
+              "choice": "wait",
+              "probability": 0.82
+            },
+            {
+              "type": "choice",
+              "name": "crossover",
+              "choice": "downward"
+            },
+            {
+              "type": "choice",
+              "name": "evidence",
+              "choice": "sufficient"
+            }
+          ],
+          "provider": "test",
+          "model": "smoke-model",
+          "image": {
+            "mime_type": "image/png",
+            "width": 1000,
+            "height": 576,
+            "sha256": "99b56fe8774bfc97f73b06b4b24dc8e7b6c63ea8c79116289c878476986dc37c"
+          },
+          "capture_url": "/api/decisions/dec_b0de58640f5c469aa617830e7c193b6f/capture",
+          "eligible_for_automation": true,
+          "eligibility_reasons": [],
+          "paper_orders_unchanged": true,
+          "reviewer_model": "smoke-model",
+          "review_questions": [
+            {
+              "type": "choice",
+              "name": "verdict",
+              "instructions": "Review the analyst's actual action and chart answers against the frozen snapshot and backend facts. Accept only when the image supports the signal, the action follows the simple SMA strategy, and the paper account can support at least one share when buying.",
+              "choices": [
+                {
+                  "value": "accept",
+                  "description": "Proposal is supported."
+                },
+                {
+                  "value": "reject_insufficient_cash",
+                  "description": "Cannot afford one share."
+                },
+                {
+                  "value": "reject_unsupported_signal",
+                  "description": "Signal or action is unsupported."
+                },
+                {
+                  "value": "reject_insufficient_evidence",
+                  "description": "Chart evidence is inadequate."
+                },
+                {
+                  "value": "reject_other",
+                  "description": "Another issue prevents acceptance."
+                }
+              ]
+            }
+          ],
+          "reviewer_answers": [
+            {
+              "type": "choice",
+              "name": "verdict",
+              "choice": "accept"
+            }
+          ],
+          "final_check": {
+            "action": "wait",
+            "reviewer_verdict": "accept",
+            "facts": {
+              "symbol": "AAPL",
+              "cutoff": "2026-11-09T14:32:00Z",
+              "price": 9,
+              "cash": 1000,
+              "shares": 0,
+              "one_share_affordable": true,
+              "python_crossover": {
+                "available": true,
+                "current": {
+                  "fast": 9,
+                  "slow": 10.5,
+                  "timestamp": "2026-11-09T14:32:00Z"
+                },
+                "fast": "Fast SMA",
+                "previous": {
+                  "fast": 12,
+                  "slow": 11,
+                  "timestamp": "2026-11-09T14:31:00Z"
+                },
+                "signal": "downward",
+                "slow": "Slow SMA"
+              }
+            },
+            "rules_passed": true,
+            "passed": true
+          },
+          "analyst_error": null,
+          "reviewer_error": null
+        }
+      }
+    }
+  },
+  {
+    "question": "Run a new decision for this chart and compare it with the earlier assessment.",
+    "text": "AssistantAAPL at 2026-11-09T14:33:00Z: the chart assessment returned buy with probability 91%. Python crossover: upward; reviewer: accept. Final check: passed.  No earlier assessment exists for this ticker and data mode in this conversation. This is advisory only.Ticker AAPL · live · chart time 2026-11-09T14:33:00Z · choice buy · probability 91%Tool 1: assess_current_chartArguments{\"compare_with_previous\":true}Returned result{\n  \"status\": \"ok\",\n  \"data_mode\": \"live\",\n  \"ticker\": \"AAPL\",\n  \"interval\": \"1m\",\n  \"chart_time\": \"2026-11-09T14:33:00Z\",\n  \"snapshot_id\": \"snap_7a683ce5fd874a40bc0744deb811f0c2\",\n  \"choice\": \"buy\",\n  \"probability\": 0.91,\n  \"python_crossover\": \"upward\",\n  \"reviewer_verdict\": \"accept\",\n  \"eligible_for_automation\": true,\n  \"capture_url\": \"/api/decisions/dec_269b14409b254891a8adb004bc55c856/capture\",\n  \"decision\": {\n    \"decision_id\": \"dec_269b14409b254891a8adb004bc55c856\",\n    \"snapshot\": {\n      \"candles\": [\n        {\n          \"close\": 10,\n          \"high\": 11,\n          \"low\": 9,\n          \"open\": 9,\n          \"timestamp\": \"2026-11-09T14:30:00Z\",\n          \"volume\": 100\n        },\n        {\n          \"close\": 12,\n          \"high\": 13,\n          \"low\": 10,\n          \"open\": 10,\n          \"timestamp\": \"2026-11-09T14:31:00Z\",\n          \"volume\": 100\n        },\n        {\n          \"close\": 9,\n          \"high\": 12,\n          \"low\": 8,\n          \"open\": 12,\n          \"timestamp\": \"2026-11-09T14:32:00Z\",\n          \"volume\": 100\n        },\n        {\n          \"close\": 13,\n          \"high\": 14,\n          \"low\": 8,\n          \"open\": 9,\n          \"timestamp\": \"2026-11-09T14:33:00Z\",\n          \"volume\": 100\n        }\n      ],\n      \"chart_range\": {\n        \"candles\": 4,\n        \"end\": \"2026-11-09T14:33:00Z\",\n        \"start\": \"2026-11-09T14:30:00Z\"\n      },\n      \"cutoff\": \"2026-11-09T14:33:00Z\",\n      \"indicators\": [\n        {\n          \"created_at_utc\": \"2026-11-18T15:42:48.482882Z\",\n          \"indicator_id\": 1,\n          \"name\": \"Fast SMA\",\n          \"settings\": {\n            \"window\": 1\n          },\n          \"symbol\": \"AAPL\",\n          \"timeframe\": \"1m\",\n          \"type\": \"sma\",\n          \"units\": \"price\",\n          \"values\": [\n            {\n              \"timestamp\": \"2026-11-09T14:30:00Z\",\n              \"value\": 10\n            },\n            {\n              \"timestamp\": \"2026-11-09T14:31:00Z\",\n              \"value\": 12\n            },\n            {\n              \"timestamp\": \"2026-11-09T14:32:00Z\",\n              \"value\": 9\n            },\n            {\n              \"timestamp\": \"2026-11-09T14:33:00Z\",\n              \"value\": 13\n            }\n          ]\n        },\n        {\n          \"created_at_utc\": \"2026-11-18T15:42:49.289971Z\",\n          \"indicator_id\": 2,\n          \"name\": \"Slow SMA\",\n          \"settings\": {\n            \"window\": 2\n          },\n          \"symbol\": \"AAPL\",\n          \"timeframe\": \"1m\",\n          \"type\": \"sma\",\n          \"units\": \"price\",\n          \"values\": [\n            {\n              \"timestamp\": \"2026-11-09T14:30:00Z\",\n              \"value\": null\n            },\n            {\n              \"timestamp\": \"2026-11-09T14:31:00Z\",\n              \"value\": 11\n            },\n            {\n              \"timestamp\": \"2026-11-09T14:32:00Z\",\n              \"value\": 10.5\n            },\n            {\n              \"timestamp\": \"2026-11-09T14:33:00Z\",\n              \"value\": 11\n            }\n          ]\n        }\n      ],\n      \"interval\": \"1m\",\n      \"paper_position\": {\n        \"account_id\": 1,\n        \"average_cost\": null,\n        \"cash\": 1000,\n        \"order_count\": 0,\n        \"shares\": 0\n      },\n      \"python_crossover\": {\n        \"available\": true,\n        \"current\": {\n          \"fast\": 13,\n          \"slow\": 11,\n          \"timestamp\": \"2026-11-09T14:33:00Z\"\n        },\n        \"fast\": \"Fast SMA\",\n        \"previous\": {\n          \"fast\": 9,\n          \"slow\": 10.5,\n          \"timestamp\": \"2026-11-09T14:32:00Z\"\n        },\n        \"signal\": \"upward\",\n        \"slow\": \"Slow SMA\"\n      },\n      \"snapshot_id\": \"snap_7a683ce5fd874a40bc0744deb811f0c2\",\n      \"symbol\": \"AAPL\"\n    },\n    \"questions\": [\n      {\n        \"type\": \"choice\",\n        \"name\": \"action\",\n        \"instructions\": \"Which action fits this paper position and the strategy rules? Buy adds shares, sell reduces the position, hold keeps an open position, wait stays flat, and close exits the entire position.\",\n        \"choices\": [\n          {\n            \"value\": \"buy\",\n            \"description\": \"Add whole shares.\"\n          },\n          {\n            \"value\": \"sell\",\n            \"description\": \"Reduce an open long position.\"\n          },\n          {\n            \"value\": \"hold\",\n            \"description\": \"Keep an open position unchanged.\"\n          },\n          {\n            \"value\": \"wait\",\n            \"description\": \"Stay flat with no position.\"\n          },\n          {\n            \"value\": \"close\",\n            \"description\": \"Exit the entire open position.\"\n          }\n        ]\n      },\n      {\n        \"type\": \"choice\",\n        \"name\": \"crossover\",\n        \"instructions\": \"At the selected candle, is an upward crossover, a downward crossover, or no crossover visible? Choose unreadable if the image cannot be assessed.\",\n        \"choices\": [\n          {\n            \"value\": \"upward\",\n            \"description\": \"Fast SMA crossed above slow SMA.\"\n          },\n          {\n            \"value\": \"downward\",\n            \"description\": \"Fast SMA crossed below slow SMA.\"\n          },\n          {\n            \"value\": \"none\",\n            \"description\": \"No crossover is visible at the cutoff.\"\n          },\n          {\n            \"value\": \"unreadable\",\n            \"description\": \"The chart cannot be read reliably.\"\n          }\n        ]\n      },\n      {\n        \"type\": \"choice\",\n        \"name\": \"evidence\",\n        \"instructions\": \"Is the visible chart sufficient to assess the signal at the cutoff?\",\n        \"choices\": [\n          {\n            \"value\": \"sufficient\",\n            \"description\": \"The visible chart is sufficient.\"\n          },\n          {\n            \"value\": \"insufficient\",\n            \"description\": \"More visible history or detail is needed.\"\n          },\n          {\n            \"value\": \"unreadable\",\n            \"description\": \"The image cannot be read.\"\n          }\n        ]\n      }\n    ],\n    \"answers\": [\n      {\n        \"type\": \"choice\",\n        \"name\": \"action\",\n        \"choice\": \"buy\",\n        \"probability\": 0.91\n      },\n      {\n        \"type\": \"choice\",\n        \"name\": \"crossover\",\n        \"choice\": \"upward\"\n      },\n      {\n        \"type\": \"choice\",\n        \"name\": \"evidence\",\n        \"choice\": \"sufficient\"\n      }\n    ],\n    \"provider\": \"test\",\n    \"model\": \"smoke-model\",\n    \"image\": {\n      \"mime_type\": \"image/png\",\n      \"width\": 1000,\n      \"height\": 576,\n      \"sha256\": \"dd3af38286a51d3033109dfb8859c0da615236cd9e2baa44a92a55155a061fe1\"\n    },\n    \"capture_url\": \"/api/decisions/dec_269b14409b254891a8adb004bc55c856/capture\",\n    \"eligible_for_automation\": true,\n    \"eligibility_reasons\": [],\n    \"paper_orders_unchanged\": true,\n    \"reviewer_model\": \"smoke-model\",\n    \"review_questions\": [\n      {\n        \"type\": \"choice\",\n        \"name\": \"verdict\",\n        \"instructions\": \"Review the analyst's actual action and chart answers against the frozen snapshot and backend facts. Accept only when the image supports the signal, the action follows the simple SMA strategy, and the paper account can support at least one share when buying.\",\n        \"choices\": [\n          {\n            \"value\": \"accept\",\n            \"description\": \"Proposal is supported.\"\n          },\n          {\n            \"value\": \"reject_insufficient_cash\",\n            \"description\": \"Cannot afford one share.\"\n          },\n          {\n            \"value\": \"reject_unsupported_signal\",\n            \"description\": \"Signal or action is unsupported.\"\n          },\n          {\n            \"value\": \"reject_insufficient_evidence\",\n            \"description\": \"Chart evidence is inadequate.\"\n          },\n          {\n            \"value\": \"reject_other\",\n            \"description\": \"Another issue prevents acceptance.\"\n          }\n        ]\n      }\n    ],\n    \"reviewer_answers\": [\n      {\n        \"type\": \"choice\",\n        \"name\": \"verdict\",\n        \"choice\": \"accept\"\n      }\n    ],\n    \"final_check\": {\n      \"action\": \"buy\",\n      \"reviewer_verdict\": \"accept\",\n      \"facts\": {\n        \"symbol\": \"AAPL\",\n        \"cutoff\": \"2026-11-09T14:33:00Z\",\n        \"price\": 13,\n        \"cash\": 1000,\n        \"shares\": 0,\n        \"one_share_affordable\": true,\n        \"python_crossover\": {\n          \"available\": true,\n          \"current\": {\n            \"fast\": 13,\n            \"slow\": 11,\n            \"timestamp\": \"2026-11-09T14:33:00Z\"\n          },\n          \"fast\": \"Fast SMA\",\n          \"previous\": {\n            \"fast\": 9,\n            \"slow\": 10.5,\n            \"timestamp\": \"2026-11-09T14:32:00Z\"\n          },\n          \"signal\": \"upward\",\n          \"slow\": \"Slow SMA\"\n        }\n      },\n      \"rules_passed\": true,\n      \"passed\": true\n    },\n    \"analyst_error\": null,\n    \"reviewer_error\": null\n  },\n  \"previous_assessment\": null\n}",
+    "result": {
+      "status": "ok",
+      "data_mode": "live",
+      "ticker": "AAPL",
+      "interval": "1m",
+      "chart_time": "2026-11-09T14:33:00Z",
+      "snapshot_id": "snap_7a683ce5fd874a40bc0744deb811f0c2",
+      "choice": "buy",
+      "probability": 0.91,
+      "python_crossover": "upward",
+      "reviewer_verdict": "accept",
+      "eligible_for_automation": true,
+      "capture_url": "/api/decisions/dec_269b14409b254891a8adb004bc55c856/capture",
+      "decision": {
+        "decision_id": "dec_269b14409b254891a8adb004bc55c856",
+        "snapshot": {
+          "candles": [
+            {
+              "close": 10,
+              "high": 11,
+              "low": 9,
+              "open": 9,
+              "timestamp": "2026-11-09T14:30:00Z",
+              "volume": 100
+            },
+            {
+              "close": 12,
+              "high": 13,
+              "low": 10,
+              "open": 10,
+              "timestamp": "2026-11-09T14:31:00Z",
+              "volume": 100
+            },
+            {
+              "close": 9,
+              "high": 12,
+              "low": 8,
+              "open": 12,
+              "timestamp": "2026-11-09T14:32:00Z",
+              "volume": 100
+            },
+            {
+              "close": 13,
+              "high": 14,
+              "low": 8,
+              "open": 9,
+              "timestamp": "2026-11-09T14:33:00Z",
+              "volume": 100
+            }
+          ],
+          "chart_range": {
+            "candles": 4,
+            "end": "2026-11-09T14:33:00Z",
+            "start": "2026-11-09T14:30:00Z"
+          },
+          "cutoff": "2026-11-09T14:33:00Z",
+          "indicators": [
+            {
+              "created_at_utc": "2026-11-18T15:42:48.482882Z",
+              "indicator_id": 1,
+              "name": "Fast SMA",
+              "settings": {
+                "window": 1
+              },
+              "symbol": "AAPL",
+              "timeframe": "1m",
+              "type": "sma",
+              "units": "price",
+              "values": [
+                {
+                  "timestamp": "2026-11-09T14:30:00Z",
+                  "value": 10
+                },
+                {
+                  "timestamp": "2026-11-09T14:31:00Z",
+                  "value": 12
+                },
+                {
+                  "timestamp": "2026-11-09T14:32:00Z",
+                  "value": 9
+                },
+                {
+                  "timestamp": "2026-11-09T14:33:00Z",
+                  "value": 13
+                }
+              ]
+            },
+            {
+              "created_at_utc": "2026-11-18T15:42:49.289971Z",
+              "indicator_id": 2,
+              "name": "Slow SMA",
+              "settings": {
+                "window": 2
+              },
+              "symbol": "AAPL",
+              "timeframe": "1m",
+              "type": "sma",
+              "units": "price",
+              "values": [
+                {
+                  "timestamp": "2026-11-09T14:30:00Z",
+                  "value": null
+                },
+                {
+                  "timestamp": "2026-11-09T14:31:00Z",
+                  "value": 11
+                },
+                {
+                  "timestamp": "2026-11-09T14:32:00Z",
+                  "value": 10.5
+                },
+                {
+                  "timestamp": "2026-11-09T14:33:00Z",
+                  "value": 11
+                }
+              ]
+            }
+          ],
+          "interval": "1m",
+          "paper_position": {
+            "account_id": 1,
+            "average_cost": null,
+            "cash": 1000,
+            "order_count": 0,
+            "shares": 0
+          },
+          "python_crossover": {
+            "available": true,
+            "current": {
+              "fast": 13,
+              "slow": 11,
+              "timestamp": "2026-11-09T14:33:00Z"
+            },
+            "fast": "Fast SMA",
+            "previous": {
+              "fast": 9,
+              "slow": 10.5,
+              "timestamp": "2026-11-09T14:32:00Z"
+            },
+            "signal": "upward",
+            "slow": "Slow SMA"
+          },
+          "snapshot_id": "snap_7a683ce5fd874a40bc0744deb811f0c2",
+          "symbol": "AAPL"
+        },
+        "questions": [
+          {
+            "type": "choice",
+            "name": "action",
+            "instructions": "Which action fits this paper position and the strategy rules? Buy adds shares, sell reduces the position, hold keeps an open position, wait stays flat, and close exits the entire position.",
+            "choices": [
+              {
+                "value": "buy",
+                "description": "Add whole shares."
+              },
+              {
+                "value": "sell",
+                "description": "Reduce an open long position."
+              },
+              {
+                "value": "hold",
+                "description": "Keep an open position unchanged."
+              },
+              {
+                "value": "wait",
+                "description": "Stay flat with no position."
+              },
+              {
+                "value": "close",
+                "description": "Exit the entire open position."
+              }
+            ]
+          },
+          {
+            "type": "choice",
+            "name": "crossover",
+            "instructions": "At the selected candle, is an upward crossover, a downward crossover, or no crossover visible? Choose unreadable if the image cannot be assessed.",
+            "choices": [
+              {
+                "value": "upward",
+                "description": "Fast SMA crossed above slow SMA."
+              },
+              {
+                "value": "downward",
+                "description": "Fast SMA crossed below slow SMA."
+              },
+              {
+                "value": "none",
+                "description": "No crossover is visible at the cutoff."
+              },
+              {
+                "value": "unreadable",
+                "description": "The chart cannot be read reliably."
+              }
+            ]
+          },
+          {
+            "type": "choice",
+            "name": "evidence",
+            "instructions": "Is the visible chart sufficient to assess the signal at the cutoff?",
+            "choices": [
+              {
+                "value": "sufficient",
+                "description": "The visible chart is sufficient."
+              },
+              {
+                "value": "insufficient",
+                "description": "More visible history or detail is needed."
+              },
+              {
+                "value": "unreadable",
+                "description": "The image cannot be read."
+              }
+            ]
+          }
+        ],
+        "answers": [
+          {
+            "type": "choice",
+            "name": "action",
+            "choice": "buy",
+            "probability": 0.91
+          },
+          {
+            "type": "choice",
+            "name": "crossover",
+            "choice": "upward"
+          },
+          {
+            "type": "choice",
+            "name": "evidence",
+            "choice": "sufficient"
+          }
+        ],
+        "provider": "test",
+        "model": "smoke-model",
+        "image": {
+          "mime_type": "image/png",
+          "width": 1000,
+          "height": 576,
+          "sha256": "dd3af38286a51d3033109dfb8859c0da615236cd9e2baa44a92a55155a061fe1"
+        },
+        "capture_url": "/api/decisions/dec_269b14409b254891a8adb004bc55c856/capture",
+        "eligible_for_automation": true,
+        "eligibility_reasons": [],
+        "paper_orders_unchanged": true,
+        "reviewer_model": "smoke-model",
+        "review_questions": [
+          {
+            "type": "choice",
+            "name": "verdict",
+            "instructions": "Review the analyst's actual action and chart answers against the frozen snapshot and backend facts. Accept only when the image supports the signal, the action follows the simple SMA strategy, and the paper account can support at least one share when buying.",
+            "choices": [
+              {
+                "value": "accept",
+                "description": "Proposal is supported."
+              },
+              {
+                "value": "reject_insufficient_cash",
+                "description": "Cannot afford one share."
+              },
+              {
+                "value": "reject_unsupported_signal",
+                "description": "Signal or action is unsupported."
+              },
+              {
+                "value": "reject_insufficient_evidence",
+                "description": "Chart evidence is inadequate."
+              },
+              {
+                "value": "reject_other",
+                "description": "Another issue prevents acceptance."
+              }
+            ]
+          }
+        ],
+        "reviewer_answers": [
+          {
+            "type": "choice",
+            "name": "verdict",
+            "choice": "accept"
+          }
+        ],
+        "final_check": {
+          "action": "buy",
+          "reviewer_verdict": "accept",
+          "facts": {
+            "symbol": "AAPL",
+            "cutoff": "2026-11-09T14:33:00Z",
+            "price": 13,
+            "cash": 1000,
+            "shares": 0,
+            "one_share_affordable": true,
+            "python_crossover": {
+              "available": true,
+              "current": {
+                "fast": 13,
+                "slow": 11,
+                "timestamp": "2026-11-09T14:33:00Z"
+              },
+              "fast": "Fast SMA",
+              "previous": {
+                "fast": 9,
+                "slow": 10.5,
+                "timestamp": "2026-11-09T14:32:00Z"
+              },
+              "signal": "upward",
+              "slow": "Slow SMA"
+            }
+          },
+          "rules_passed": true,
+          "passed": true
+        },
+        "analyst_error": null,
+        "reviewer_error": null
+      },
+      "previous_assessment": null
+    }
+  }
+]

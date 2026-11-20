@@ -1,0 +1,33 @@
+{
+  "mode": "--core-only",
+  "label": "Offline checks with constructed market/model fixtures",
+  "node": "v25.7.0",
+  "python": "C:\\Users\\Owner\\Desktop\\School Work\\5 Fall 2026\\IST 402 - Vibe Coding\\live-market-workplace\\backend\\data\\check-runs\\intentional-missing-python.exe",
+  "started_at": "2026-11-19T16:34:50.458Z",
+  "steps": [
+    {
+      "name": "package-integrity",
+      "command": "C:\\Users\\Owner\\Desktop\\School Work\\5 Fall 2026\\IST 402 - Vibe Coding\\live-market-workplace\\backend\\data\\check-runs\\intentional-missing-python.exe",
+      "args": [
+        "-m",
+        "pip",
+        "check"
+      ],
+      "status": "failed",
+      "exit_code": -4058,
+      "timeout": false,
+      "error": "spawn C:\\Users\\Owner\\Desktop\\School Work\\5 Fall 2026\\IST 402 - Vibe Coding\\live-market-workplace\\backend\\data\\check-runs\\intentional-missing-python.exe ENOENT",
+      "elapsed_ms": 9
+    }
+  ],
+  "completed_at": "2026-11-19T16:34:50.471Z",
+  "status": "failed",
+  "unrun": [
+    "sma-reference",
+    "accounting",
+    "backtests",
+    "chat-memory",
+    "frontend-policy",
+    "frontend-build"
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "provenance": "Constructed BTST bars in a disposable MARKET_DATABASE; no Yahoo or model request.",
+  "checks": [
+    {
+      "check": "Known example: UI / API / SQLite agree",
+      "run_id": "sim_83141e33ea284c25b487125c5b41c765",
+      "summary": {
+        "cash": 1040,
+        "decisions": 6,
+        "equity": 1040,
+        "fills": 2,
+        "initial_cash": 1000,
+        "pending": 0,
+        "realized": 40,
+        "rejected": 0,
+        "return_percent": 4.0000000000000036,
+        "shares": 0,
+        "total_pnl": 40,
+        "trading_bars": 6,
+        "unrealized": 0,
+        "warmup_bars": 0
+      },
+      "orders": [
+        {
+          "action": "buy",
+          "fill": {
+            "event_id": "open:2026-11-09T14:34:00Z",
+            "execution_time": "2026-11-09T14:34:00Z",
+            "price": 100,
+            "sequence": 5,
+            "source": "bar_open"
+          },
+          "order_id": 1,
+          "quantity": 4,
+          "rejection_reason": null,
+          "request_id": "decision:2026-11-09T14:33:00Z",
+          "run_id": "sim_83141e33ea284c25b487125c5b41c765",
+          "side": "buy",
+          "status": "filled",
+          "submission_sequence": 4,
+          "submitted_at": "2026-11-09T14:34:00Z",
+          "symbol": "BTST"
+        },
+        {
+          "action": "close",
+          "fill": {
+            "event_id": "open:2026-11-09T14:35:00Z",
+            "execution_time": "2026-11-09T14:35:00Z",
+            "price": 110,
+            "sequence": 6,
+            "source": "bar_open"
+          },
+          "order_id": 2,
+          "quantity": 4,
+          "rejection_reason": null,
+          "request_id": "decision:2026-11-09T14:34:00Z",
+          "run_id": "sim_83141e33ea284c25b487125c5b41c765",
+          "side": "sell",
+          "status": "filled",
+          "submission_sequence": 5,
+          "submitted_at": "2026-11-09T14:35:00Z",
+          "symbol": "BTST"
+        }
+      ]
+    },
+    {
+      "check": "Pending end order remains unfilled",
+      "run_id": "sim_6ee3270d13ff4c4490bc41f8d82b99ef"
+    },
+    {
+      "check": "Reopen and rerun saved data",
+      "run_id": "sim_ac1b13e8950341878a38f502d9f226b1",
+      "result_hash": "a12a6e370c7eae8dd6e4a8cd6d73bdeec27c0fc399b81b9a4c34353ecccce871",
+      "dataset_hash": "26e86ee5dfbd447a34359105a080d2694f93d7ac5b7d8d42b1c0974a8e3d5765"
+    },
+    {
+      "check": "422 empty history and constructed 503 leave selected run unchanged"
+    },
+    {
+      "check": "Delayed saved-run response stays tied to BTST / 1m while market chart switches; live account unchanged"
+    },
+    {
+      "check": "Saved run reopens after browser reload; mobile result fits 390px"
+    }
+  ]
+}

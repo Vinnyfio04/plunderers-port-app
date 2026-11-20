@@ -47,7 +47,7 @@ def prepare_database(target=None, legacy=None):
                 raise RuntimeError('Existing market.db is not a recognized project store; refusing to overwrite or merge it.')
             if 'schema_migrations' in tables:
                 version = current.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0]
-                if version and version>4:
+                if version and version>5:
                     raise RuntimeError('Database schema is newer than this backend')
     if not target.exists() and legacy and legacy.exists():
         temporary = Path(str(target) + '.migration')

@@ -1,245 +1,73 @@
-# Current project state
+# Plunderer's Port — current handoff
 
-## Latest change — intraday history windows (November 15, prompt 31)
+Updated November 20, 2026 (America/New_York). All seven approved SMA/simulation/backtesting implementation stages are complete locally. The student explicitly approved committing and pushing all current changes to workplace-chatbot on November 20 (prompt 59). Use Git HEAD, branch tracking and the workflow run for the final publication/CI state; the earlier dated uncommitted notes describe the pre-approval snapshots. No live brokerage execution is enabled. This status does not declare Part 4.1 live streaming complete.
 
-This section supersedes older current-state claims below. On ui-rework, the uncommitted maximum-Daily work is retained and extended to practical native Yahoo intraday backfill: 1m seven calendar days, 5m/15m sixty, 1h 730, Daily maximum available. New backend/interval_history.py adds typed current bars/revisions/fetch audits via additive schema migration 4, per-frame coalesced/incremental downloads, and provider-resolution coverage metadata. Changed candle_store/database, main, recorded_history, live_candles, yahoo_history and Vue main.js. Earliest now serves all intervals, with visible range labels and a 5,000-bar intraday budget. Existing chartAdapter Daily changes remain. README, docs/design-pipeline.md, docs/history-windows.md, docs/verification.md and prompts/31-intraday-history-ranges.md describe sources and behavior.
+## Checkout and review boundary
 
-No tests/builds/import checks/browser/API assertions or model requests were run, per the continuing student instruction. No installs/manifests/lockfiles changed. Source review is complete; actual backfill ranges, migration, provider hourly alignment, Earliest navigation, socket revisions and live reconciliation remain unverified. The earlier server PID/tool session was no longer available during inventory; no new server was started and current service readiness was not checked. Reload the ignored root .env assignment privately if restarting the normal backend; never display it. Review the changes with the student before any commit.
+- Root: C:\Users\Owner\Desktop\School Work\5 Fall 2026\IST 402 - Vibe Coding\live-market-workplace.
+- Branch: workplace-chatbot. Remote: https://github.com/Vinnyfio04/plunderers-port-app.
+- Prior committed base: 3866209f6d28b842db2bc56e262ae2e05f7d578c, the branding commit, predates this feature publication. Git log identifies the final feature commit. No PR or manual workflow dispatch is requested; a normal push triggers the configured workflow.
+- Preserve all existing student work, especially report.md. The final documentation leaves that file unchanged. Review its old repository link, incomplete voice sentence and implementation/evidence wording with the student before submission.
+- Use [AGENTS.md](../AGENTS.md). Review proposed/completed changes before committing; never commit unreviewed work. No new environment or dependency installation is needed.
 
-Next task: activate the current source with the documented one-worker backend and Vue startup commands; only when the student permits verification, make a focused comparison of each interval's earliest/latest saved dates and one historical/native versus recent minute-derived candle. Do not launch the full regression or million-row benchmark by default. Prior regular-session end-to-end live evidence remains pending.
+## Read first
 
-**Updated:** November 14, 2026
+- [Strategy workstation guide](../docs/strategy-workstation.md): operation, acceptance, SMA/completion semantics, order execution, accounting formulas, availability modes, results and limits.
+- [README](../README.md): tested startup/API examples and check commands.
+- [Design pipeline](../docs/design-pipeline.md): shared calculations, history/collector paths, isolated runner/storage and UI/API responsibilities.
+- [Verification](../docs/verification.md): actual commands/results, failed and passing checks, fixture provenance and remaining unrun checks. Preserve its chronological history.
+- [Part 4.1 acceptance](../docs/assignment_instructions.md): original live requirements and current evidence gap, separately from the strategy extension.
+- [Previous handoff snapshot](2026-11-19-before-final-handoff.md): preserved earlier dated context; it is not the current status.
 
-## Latest handoff — continuous market and market.db
+## Implemented behavior and source entry points
 
-This section supersedes older database-path/lifecycle statements below. On branch `ui-rework`, implemented prompt 24 and the continuous-market plan. Added `backend/database.py`, `candle_store.py`, `write_coordinator.py`, `check_continuous.py`, `continuous_fixture.py` and prompt 24; preserved prompt 23 and its plan. Changed recorder/importer/indexed history, backend-owned collector/reconciliation, FastAPI writer/snapshot context, Vue dated axis/paging/reconnect, SmokeTest, ignores, README, AGENTS, design/assignment/verification docs. No package/lockfile change or commit.
+- November 20 (prompt 58): removed the selected O/H/L/C/Vol strip from the main chart header and its unused CSS. Raw candle values remain in Workspace's Inspect a candle. Instrument/source/status, chart, backend and trading behavior are unchanged. Updated running-UI capture: docs/evidence/workspace-layout-1795198177414/workspace_indicators.png. No dependency or backend restart required.
+- Latest layout change (prompt 57): Indicators is its own left Workspace dropdown. Candle inspection, feed status, Backtesting and attribution were moved into Workspace so the chart is the final main-column element; narrow screens place Workspace before the chart. Sidebar forms and toolbar wrapping fit 1009px/390px viewports. Focused create/update/SQLite checks, full SmokeTest and build pass; see the latest verification entry and docs/evidence/workspace-layout-1795125216872/ for the actual running UI screenshot. No backend/dependency/trading change or restart.
+- frontend/src/main.js and chartAdapter.js: workstation, bounded history/cache, saved indicators, explicit fast/slow SMA pair, whole-share entry preview, crossover arrows, assistant chat and reviewed paper workflow. The selected older candle still uses the current paper account for preview; use Backtesting for historical account state.
+- backend/sma_engine.py and indicators.py: shared trailing batch/incremental SMA and crossover; chart, preview, frozen assessment and backtester use the same definitions. Warm-up/unfinished/explicitly partial data outputs null; missing pairs break crossover comparison. Near-equality is a tie. EMA/MACD/RSI are not implemented.
+- backend/accounting.py, paper_trading.py and simulation_account.py: shared integer-cent HALF_UP fill/valuation rules, weighted-average basis and realized/unrealized P&L. Existing SQL paper ledger retains its IDs/transactions. Each SimulationAccount is separate and has no live account/database reference.
+- backend/backtesting.py: long-only SMA entry/close rules with warm-up, causal event order, next-open or later-receipt execution, fill-time cash/share rejection and no final liquidation. One pending order at a time; no extra buying while long. Historical-bar fixed-vintage assumptions are distinct from recorded 1m availability.
+- backend/backtest_store.py and main.py /api/backtests routes: bounded read-only dataset freeze, atomic saved settings/datasets/trades/decisions/equity, hashes, idempotent request IDs, list/get/dataset/rerun. No provider download/model call or paper order. Completed runs persist; in-flight runs do not resume.
+- frontend/src/BacktestPanel.js: isolated draft/result state, saved-run browsing/rerun, equity/P&L/cash/position metrics, paginated audit tables, source/vintage/hash details and limitations. Chart changes and failures cannot relabel the selected result.
+- backend/chat_agent.py: backend Agents SDK tools for rules and frozen-chart assessment; unclear requests ask for clarification. Rules alone do not assess a chart. Tool records expose returned results; ticker/time/choice/available probability and chart preview/decision share that result. Stale context is rejected. Per-conversation earlier assessments are isolated by ticker and Live/Replay mode. New chat/reload starts a separate conversation; backend restart loses the process-local memory. No trading tool.
+- scripts/check-project.mjs, smoke-test.mjs, backtest-browser-checks.mjs and .github/workflows/smoke-test.yml: repeatable core/build/browser checks, new restart/retry/pagination coverage, push/PR/manual workflow and fixture-only artifacts.
 
-The normal store is now `backend/data/market.db`, migrated by `python -m backend.database` using the installed Python 3.13 executable. All 16 original tables matched their original values before ingestion resumed. Legacy `market-observations.sqlite3` remains as a recovery copy. Schema versions 1/2, integrity and foreign-key checks passed. All consumers use the central path; use one Uvicorn worker, and separate `MARKET_DATABASE` overrides for fixtures. Do not combine recovery and current stores automatically.
+## Storage and environment
 
-`node scripts/smoke-test.mjs` passed twice with real Chrome, Vue and FastAPI, isolated SQLite and stubbed Yahoo/model boundaries. New coverage includes migration/ownership/recovery, recording without tabs, indexed one-million-candle scale, Friday/Monday continuation, dated desktop/mobile canvas labels, in-place/repeat updates and backend restart/reconnect. Second run history p95 110.926 ms, queued writes p95 192.808 ms and commit-to-visible p95 189 ms. Existing replay SMA 10.5, actual PNG payload, visible provider error and reviewed simulator sequence all passed: cash $1,025, shares 0, realized $25/unrealized $0, fills exactly 3. Four AutoLoop corrections and failure evidence are recorded in `docs/verification.md`. Focused Yahoo history, recorded history and timeframe checks, year-boundary formatter, frontend build, Python compile and whitespace checks passed. Test child services/browser and successful databases were cleaned up.
+Production is backend/data/market.db through backend/database.py and additive versioned migrations, currently schema 5. Preserve backend/data/market-observations.sqlite3 as the legacy recovery copy. Preserve all account/decision/order IDs. Use one Uvicorn worker and the backend-owned collector/serialized writer. Fixtures require a different MARKET_DATABASE; full-history scans stay out of normal tick/chart paths.
 
-Normal services remain running at `http://127.0.0.1:8000` and `http://127.0.0.1:5173/`; stop each with Ctrl+C in its owning terminal. Health/page return HTTP 200. The actual database/API/browser agree on 1,950 AAPL minutes through Friday November 13 20:59 UTC, close 356.3999938964844 and volume 725503; Market closed, next open Monday November 16 14:30 UTC. Saturday history reconciliation succeeded. Real stream receipt is not inferred from historical download or deterministic fixture checks.
+A November 19 read-only metadata query found schema 5, one paper account, zero paper orders/fills, five decision records and two backtest runs. These counts are storage evidence, not a current feed/freshness claim. November 18 migration verification compared complete protected account/decision table fingerprints before/after migration and saved backtests; all matched. No production data was changed by the final documentation task.
 
-No pending dependency approval or setup question. Next task: during the next regular session, match one real Yahoo observation/receipt ID to its materialized candle, WebSocket update and visible chart, then verify completed-minute volume reconciliation and upstream-unavailable status. Preserve the separate pending live image-model/voice observations. Before resuming, follow `handoffs/create-handoff.md`: read current docs and verify Git status, files, database/schema and the smallest relevant check. Review the current diff with the student before any commit.
+Existing local environment: Python 3.13.17 at C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe; Node 25.7.0/npm 11.10.1; OpenAI 3.52.0 and Agents 0.24.0 pinned in backend/requirements.txt. Reuse installed packages. Hosted CI selects Python 3.13/Node 24 and installs the existing manifests/lockfile in its temporary runner. Local passes do not prove hosted runtime/package resolution.
 
-## Current capability
+From the project root, start the backend with the tested command (first identify existing listeners; do not launch a duplicate):
 
-The Vue dashboard supports live candles, recorded-session Replay, persisted named indicators, a local long-only paper account with append-only P&L history, and advisory frozen-chart analysis. A completed-candle snapshot freezes candles, volume, indicators, symbol, interval, range, cutoff, and the SQLite paper position; Vue exports a chart-only PNG and displays the retained preview and named model answers without creating an order.
+~~~powershell
+& 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe' -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+~~~
 
-The decision route now uses separate analyst and reviewer calls against the same snapshot and PNG. It saves both named outputs and model names under one decision ID, then Python applies account and SMA strategy rules. Vue displays the reviewer verdict and supporting cash, price, shares, and crossover facts.
+In another terminal:
 
-Vue now has Start/Stop paper automation controls. A unique SQLite candle claim runs before automatic chart capture and review. Eligible approved actions create pending simulator orders; the next observed price transaction rechecks age, generation, cash, and shares and links the decision ID to the fill and P&L. Fixture automation uses a separate disposable database.
+~~~powershell
+Set-Location frontend
+npm run dev
+~~~
 
-## Files created or changed
+Configured URLs: dashboard http://127.0.0.1:5173/ and backend docs http://127.0.0.1:8000/docs. These are not a fresh liveness assertion. Stop services in their owning terminals. The plain command reads process environment and does not automatically load root .env. Load any existing key privately for authenticated model/voice features; never print it or put it in frontend/source/prompts/logs/screenshots. Clear fixture flags and database overrides before normal startup. No restart is required for step 7's documentation-only changes.
 
-- `backend/main.py`: FastAPI application, health route, CSV loader, and history route.
-- `backend/yahoo_stream.py`: bounded single-ticker yfinance WebSocket subscriber and normalized output.
-- `backend/market_store.py`: SQLite schema, canonical deduplication, revision links, receipt audit trail, and inspection CLI.
-- `backend/check_market_store.py`: repeat, changed-value, and restart-persistence verification using labeled test data.
-- `backend/candle_aggregation.py`: effective-observation query consumer, one-minute OHLCV calculation, separate ended state, and CLI.
-- `backend/check_candle_aggregation.py`: normal, ended, late, correction, reset, and missing-baseline verification.
-- `backend/timeframe_history.py`: exchange-calendar session assignment, replay-aware revision selection, timeframe aggregation, and coverage metadata.
-- `backend/check_timeframe_history.py`: sample, gap, session, revision, volume-certainty, DST, and early-close verification.
-- `backend/live_candles.py`: shared Yahoo task, record-to-candle aggregation, test replay, and FastAPI WebSocket broadcasting.
-- `backend/check_live_candles.py`: stored-row, 1m/5m, next-interval, contract, and disconnect verification.
-- `backend/replay_session.py`: read-only saved-session selection and receipt-ordered in-memory reconstruction.
-- `backend/check_replay_session.py`: deterministic late-arrival, revision, repeatability, count, and empty-range checks.
-- `backend/check_replay_websocket.py`: offline FastAPI WebSocket and repeatability verification.
-- `backend/indicators.py`: indicator registry, SMA, rolling price range, validation, calculation, and SQLite instance store.
-- `backend/check_indicators.py`: labeled fixture, warm-up, independent settings, validation, and restart-persistence verification.
-- `backend/paper_trading.py`: long-only account schema, reusable execution function, idempotency, market events, pending orders, and atomic fills.
-- `backend/check_paper_account.py`: $1,000 fixture sequence, retry, rejection, hold/wait, and restart verification.
-- `backend/check_pnl_history.py`: five-state P&L, repeated-event, direct-SQLite, and restart verification.
-- `backend/decisions.py`: immutable decision snapshots, PNG validation/storage, OpenAI Decisions request construction, named-answer validation, and crossover comparison.
-- `backend/decision_provider_double.py`: local Decisions API test double that verifies and records the image and JSON parts.
-- `backend/check_decision_snapshot.py`: labeled downward-crossover snapshot fixture and SQLite assertions.
-- `backend/check_decision_review.py`: three fixed analyst/reviewer cases and persisted-result assertions.
-- `backend/check_paper_automation.py`: disposable approval, retry, next-price fill, veto, Stop, and restart check.
-- `backend/data/automation-browser-candles.csv`: labeled three-minute browser trigger fixture.
-- `backend/requirements.txt`: exact FastAPI, Uvicorn, yfinance, and exchange-calendars pins.
-- `frontend/package.json`: project scripts and direct dependencies.
-- `frontend/package-lock.json`: exact frontend dependency graph.
-- `frontend/index.html`: Vite entry document.
-- `frontend/src/chartAdapter.js`: Lightweight Charts candlestick/volume adapter and UTC time conversion.
-- `frontend/src/main.js`: chart page, history request, selector, candle details, and attribution.
-- `frontend/src/style.css`: responsive chart and inspector presentation.
-- `frontend/vite.config.js`: `/api` proxy to `127.0.0.1:8000`.
-- `prompts/02-connect-vue-fastapi.md`: task prompt and approved dependency plan.
-- `prompts/03-serve-candle-history.md`: local candle-history task prompt.
-- `prompts/04-display-candles-with-lightweight-charts.md`: chart task and approved dependency plan.
-- `prompts/05-yahoo-finance-stream.md`: Yahoo stream task and approved dependency plan.
-- `prompts/06-record-yahoo-updates-sqlite.md`: SQLite recorder task prompt.
-- `prompts/07-aggregate-observations-into-candles.md`: one-minute stored-observation aggregation prompt.
-- `prompts/08-history-timeframes.md`: exchange-session history timeframe prompt.
-- `prompts/09-live-chart-websocket.md`: live backend-to-Vue candle prompt.
-- `prompts/10-recorded-session-replay.md`: offline recorded-session Replay prompt.
-- `prompts/11-extensible-indicators.md`: extensible named-indicator task prompt.
-- `prompts/12-long-only-paper-account.md`: local long-only paper account prompt.
-- `prompts/13-paper-account-pnl-history.md`: weighted-average P&L history prompt.
-- `prompts/14-ask-about-chart.md`: frozen chart decision prompt.
-- `prompts/15-two-role-decision-review.md`: separate analyst/reviewer calls and Python final gate.
-- `prompts/16-reviewed-paper-automation.md`: reviewed decision to paper execution task prompt.
-- `README.md`: dependency details plus tested start, stop, and verification commands.
-- `docs/design-pipeline.md`: current working frontend-to-backend path.
-- `docs/verification.md`: dependency, build, HTTP, failure, recovery, browser, and shutdown results.
-- `handoffs/current.md`: this handoff.
+## Latest verification and evidence
 
-## Checks performed
+November 19: node scripts/check-project.mjs passed all 11 groups in about seven minutes: pip check; eight SMA/pandas-reference, eight accounting and eight causal-backtest tests; SDK memory; seven frontend policy tests; build; full SmokeTest; strategy, chat and conversation-comparison browsers. All used existing tools and disposable stores/test providers. [Compact check report](../docs/evidence/ci-step6-local-1795105633066/local-checks.json) and [backtest observations](../docs/evidence/ci-step6-local-1795105633066/backtest-observed.json) retain actual results. A deliberately missing interpreter returned exit 1, saved a failed summary and recorded unrun checks; this is an expected failure-path test, not a remaining defect.
 
-- Verified exact Python and frontend dependency versions.
-- Built the Vue application successfully with Vite.
-- Verified the direct backend health response: HTTP 200 and expected JSON.
-- Verified the frontend proxy response: HTTP 200 and identical JSON.
-- Stopped FastAPI and confirmed the frontend proxy returned HTTP 502.
-- Restarted FastAPI and confirmed both HTTP 200 responses recovered and matched.
-- Opened the Vue page in a browser and confirmed the expected JSON was visible.
-- Stopped both services with `Ctrl+C`.
-- Verified the supplied CSV schema and rows without adding dependencies.
-- Verified `/api/history` returned HTTP 200 and three ordered candle objects.
-- Compared all six fields in the 14:31 candle; every value matched the second CSV row.
-- Opened the live history endpoint in a browser and confirmed the JSON was visible.
-- Installed and resolved `lightweight-charts@5.2.1`; npm reported zero vulnerabilities.
-- Built the chart-enabled frontend successfully.
-- Visually confirmed separate 14:30, 14:31, and 14:32 candles with aligned volume bars.
-- Exercised the candle selector and confirmed the 14:31 close was `101` and volume was `850 shares`.
-- Confirmed the TradingView attribution logo, notice, and links were visible.
-- Installed and imported `yfinance==1.8.0`; both WebSocket clients are available and `pip check` passes.
-- Opened an AAPL Yahoo WebSocket subscription without credentials.
-- Confirmed bounded no-message behavior: connection opened, receipt unverified, and corrected command exited in 10.12 seconds for an 8-second receipt timeout.
-- Verified one constructed observation, its exact repeat, and a changed same-time payload in a disposable SQLite database.
-- Confirmed two unique observation rows, three receipt rows, repeat-safe counting, preserved receipt order, and identical records after reopening from a new backend process.
-- Confirmed the constructed 15:00 UTC candle before and after its minute boundary: `100/103/100/101`, volume 11.
-- Confirmed a late middle observation recomputes high without changing close, identifiable corrections replace only the derived value, and missing/reset cumulative volume becomes unknown.
-- Installed and verified approved `exchange-calendars==4.13.2`; `pip check` passes.
-- Confirmed the supplied five-minute candle is `100/105/99/104`, volume 3550, with 3 of 5 minutes and partial daily coverage.
-- Confirmed a 14:35 gap starts a new five-minute candle in the same session and the next trading session starts a new daily candle.
-- Confirmed all five HTTP timeframe values, replay availability, revision replacement, known-zero/unknown volume distinction, frontend build, and browser candle selection.
-- Confirmed live candle messages update the same minute, append the next minute, and use the selected backend timeframe aggregation.
-- Confirmed the browser displayed matching 1m and 5m values, daily selection, source age, forming state, and upstream-disconnected while FastAPI remained connected.
-- Received and stored one actual AAPL Yahoo message at `2026-11-12T00:55:02Z`; it had no volume and was outside regular hours, so no regular-session candle was created.
-- Built the Replay-enabled frontend successfully.
-- Verified five labeled test observations replay in receipt order, including a late high and identifiable close/volume revision.
-- Verified the final 15:00 candle is `100/103/100/102`, volume 12, in the engine, FastAPI WebSocket, and visible Vue chart.
-- Ran the same browser selection twice with identical values and an unchanged SQLite observation count of five.
-- Verified the upstream Yahoo feed is disabled/disconnected throughout Replay.
-- Verified Range 2 and Range 3 calculate 5 and 6 at the third fixture candle, persist after refresh, and remain intact after a rejected zero window.
-- Verified SMA uses the same interface and produces timestamp-aligned warm-up gaps and values.
-- Verified browser and SQLite paper-account states at $600/4 shares, $710/3 shares, and $1,025/0 shares.
-- Verified one stable request retry produced no duplicate, an empty-position sale was rejected, and exactly three fills survived backend restart.
-- Verified the five expected P&L states, single-row event reprocessing, direct SQLite agreement, the visible Vue table, and persistence across a backend restart.
-- Verified the browser froze the 14:32 UTC recorded crossover, displayed a chart-only PNG preview, and showed `wait`, `downward`, and `sufficient` from the provider test double.
-- Verified the provider received a decodable 1008x660 PNG whose SHA-256 matched SQLite and the saved capture, plus `input_text`, `input_image`, and `input_json` in one user message.
-- Verified the visual and Python crossover both reported downward, the paper order count remained zero, and unreadable-image and mismatched-snapshot requests were rejected.
-- Completed the authenticated OpenAI image check against the labeled crossover fixture. The real `gpt-6-luna` answers were `wait`, `downward`, and `sufficient`; the browser and SQLite agreed, the saved PNG hash matched, and zero paper orders persisted.
-- Verified fixed reviewer acceptance, reviewer rejection, and an unaffordable accepted buy; all three saved rows matched direct SQLite and none created an order.
-- Ran a live two-call example: the analyst answered `wait/downward/sufficient`; the reviewer rejected the proposal as unsupported. Browser and SQLite agreed on the ineligible result and zero orders.
-- Verified one approved fixed decision submitted twice produced one fill at the next $100 test price: cash $600 and four shares. Veto and Stop paths skipped execution; a claim remained deduplicated after restart.
-- In the browser, Start, a newly added completed fixture candle, two mocked model replies, pending order, next-price fill, and Stop all matched direct SQLite. Decision ID linked order, fill, and P&L.
+New UI checks prove duplicate-free retry after a saved response is lost, second audit pages matching 56 decisions/58 equity events, and complete saved results/IDs surviving a real backend restart. The known backtest ends $1,040/$40 realized/two fills; existing paper regression ends $1,025/zero shares/$25 realized/three fills. Pending/rejected orders, error retention, mobile fit and delayed chart-context responses pass. Shared 1/2 SMAs give upward/13/11 in chart/preview/frozen assessment. Chat tests verify rule-only tools, wait/82% at 14:32, buy/91% at 14:33 compared to the earlier result, both times, and New chat isolation. No authenticated model call is implied.
 
-Detailed commands, initial launch failures, corrections, and observed output are in `docs/verification.md`.
+Read-only actual cached AAPL evidence: [observed values](../docs/evidence/backtest-workspace-1795104683196/observed.json) and [performance screenshot](../docs/evidence/backtest-workspace-1795104683196/saved_aapl_performance.png). November 13 SMA 5/20 yields $999.32 equity, -$0.68 total P&L and 23 fills; UI/API/saved result agree and saved-data rerun hashes match. This is cached fixed-vintage Yahoo-origin history, not original-session knowledge or a fresh live quote. Prior failed fixture checks and their corrections remain in verification.md. Existing pandas/FastAPI deprecation warnings are non-fatal.
 
-## Outstanding questions
+Step 7 changed documentation only. The latest application suite was reused rather than rerun; final checks cover document links/consistency, report preservation and git diff --check. See the final verification entry for their observed results.
 
-- Which market-data API will supply the first feed, and is delayed or simulated data acceptable for development?
-- Which instrument should be displayed first?
-- Should the first live-history source replace the synthetic CSV entirely or fall back to it when stored coverage is incomplete?
-- The Decisions integration targets OpenAI `gpt-6-luna`. The ignored root `.env` now supplies the key to the backend process; keep it out of source, prompts, logs, and Git.
-- Should watchlists or preferences persist locally, and is authentication needed initially?
-- Git is initialized on `main`, with the GitHub repository configured as `origin`.
-- The plain `python` command remains masked by a Windows Store alias; use the explicit Python path in `README.md`.
-- An in-session Yahoo payload with volume is still needed to verify Replay against an actual captured regular-session database rather than labeled test data.
-- Real Yahoo receiver-to-SQLite persistence is verified, but an in-session message with volume is still needed for the actual stored-record-to-visible-candle comparison.
-- The offline decision fixtures set `MARKET_LIVE_FEED=0`, so `/ws/candles` intentionally closes before accepting (Uvicorn logs 403). A forced provider timeout and malformed reply still need an explicit external HTTP regression check.
-- Paper automation has been verified with fixed provider replies and disposable test observations. A real Yahoo completed candle and live OpenAI automation run remain unverified; the history polling fallback handled the offline fixture.
+## Remaining checks and next review
 
-## Next task
-
-Enable the live feed and verify one real completed Yahoo candle reaches the chart and produces at most one reviewed paper automation event with a configured provider. Keep a disposable paper account for that check.
-
-## 2026-11-12 voice feature handoff
-
-- Added `backend/voice.py`, `backend/check_voice_session.py`, and `prompts/17-decision-voice-conversation.md`; changed `backend/main.py`, `frontend/src/main.js`, `frontend/src/style.css`, `README.md`, and `docs/verification.md` for read-only GPT-Live voice over WebRTC. No dependency file changed and no commit was made. Existing earlier work remains in the dirty worktree.
-- The offline mocked session-contract check passed against ignored `backend/data/automation-browser-final.sqlite3`: analyst buy, reviewer accept, one fill at $100, $600 cash/four shares afterward, with decision/order/fill counts unchanged at 1/1/1. Python compilation, Vue build, the saved-decision HTTP response, and unknown-ID/invalid-offer HTTP errors passed. The in-app browser showed the saved decision and canceled a pending microphone request with the mic off.
-- A live voice exchange was not heard. The in-app browser's microphone request stayed pending, desktop Chrome control was denied, and the student cannot use a microphone now. The two spoken questions, same-session follow-up, speaker playback, established-session shutdown, and denied microphone case still need a person with a microphone and speaker. Do not report mocked output as actual spoken output.
-- Next task: run the README live voice SmokeTest with microphone hardware, compare both spoken replies and captions with the saved SQLite decision, check End releases the browser microphone, and add the actual observations to `docs/verification.md`. Stop the two local servers with Ctrl+C after that check.
-
-## 2026-11-12 offline browser SmokeTest handoff
-
-- Added the canonical `node scripts/smoke-test.mjs` runner, disposable replay seed and direct SQLite state reader, prompt 18, and `.github/workflows/smoke-test.yml`. Updated Replay to emit completion changes, allowed Replay indicators to use the Python calculation, added indicator window editing and an automation order-size update control, and made Vite's backend target configurable for isolated ports. No dependency manifest or lockfile changed; no commit was made.
-- The final runner passed twice from separate fresh $1,000 accounts in real headless Chrome. It checked Replay SMA 10.5, decoded chart pixels and matching snapshot at a stubbed model boundary, visible provider-failure status, buy 4 at $100, sell 1 at $110, reviewer veto, close 3 at $105, duplicate candle, and Stop. Both runs ended at $1,025 cash, zero shares, $25 realized and $0 unrealized P&L, three fills. Successful temporary folders and processes were removed. The first failed run's screenshot/database remain ignored under `backend/data/smoke-runs/` as evidence for the one Replay completion correction.
-- The push workflow is configured but has not run on GitHub because this work is uncommitted. The student approved ephemeral CI installation of the project's existing pinned requirements and lockfile packages. Live Yahoo, authenticated image-model, and two-way voice observations are separate and not implied by this offline result.
-- Next task: review the working-tree changes, then commit and push if the student wants the push workflow to execute. Check the first GitHub Actions run and record its result in `docs/verification.md`. Repeat voice hardware verification when a microphone is available.
-
-## November 14, 2026 — recorded live streaming handoff
-
-- Default live history now uses SQLite through backend/recorded_history.py; explicit MARKET_CANDLE_FILE retains labeled regression fixtures. Observation and revision availability respects receipt cutoffs.
-- CandleHub emits changed historical candles, closes forming candles through a one-second evaluation task, and stores emitted candle/completion states in candle_states. Volume stays unknown when missing totals, resets, or adjacent baselines prevent a valid cumulative difference.
-- Added backend/check_recorded_history.py and prompt 20. Focused check, old aggregation/replay checks, WebSocket test feed, Vue build, and offline browser SmokeTest passed. Browser showed test OHLC 100/103/100/101 and volume 11 with upstream disconnected/local socket connected. Actual five-second Yahoo probe opened but received no observation.
-- Test services on 8014/5175 were stopped. Normal backend/frontend restarted on 8000/5173 with real Yahoo enabled and default recorded database. Browser showed no regular-session candles and an explicit waiting state; no CSV fallback. No dependencies installed; changes remain uncommitted on ui-rework.
-- Next: during a regular session, compare an actual volume-bearing Yahoo observation, SQLite IDs, derived candle, WebSocket and Vue. Review real volume availability before claiming Part 4.1 complete. Detailed results are in docs/verification.md.
-
-## November 14 — Yahoo startup history and reconciliation
-
-- Added backend/yahoo_history.py and backend/check_yahoo_history.py, prompt 22, and modified shared recorded history, hub, FastAPI startup/shutdown, Vue market status, and docs. Default startup downloads real Yahoo 1m history; periodic open-session refresh replaces completed minute OHLCV without double counting. Provisional price overlays keep volume unknown until reconciled. Bar revisions/fetches are stored separately from tick receipts.
-- Actual Yahoo returned 1950 bars; API, SQLite and browser agreed on Friday 20:59 UTC close 356.3999938964844 and volume 725503. Backend restart and repeat download retained 1950 versions/minutes. UI showed Market closed, next Monday 14:30 UTC. New reconciliation test, recorded-history regression, full offline browser SmokeTest, build and compilation passed after one Windows connection-cleanup fix.
-- Servers remain on localhost 8000 and 5173. Work is uncommitted on ui-rework. Next: verify one actual in-session WebSocket tick, provisional update and later Yahoo completed-minute reconciliation, comparing stored records, socket and browser. Keep live evidence separate from historical HTTP and mocked tests.
-
-## Latest override — testing stopped at student request (November 14)
-
-Read this section before relying on earlier passing-state claims. Prompt 27 requests a test-scope review and prohibits further testing. No test process remained at inventory; normal servers are still Vue 5173 and FastAPI 8000. Do not launch tests or provider calls without a later instruction superseding that restriction.
-
-Closed-market history has one complete offline passing run (company-history-resumed-2.log). Its repeat passed history/decision/paper behavior but failed forced-restart reconnection. The latest handshake/retry and exact socket-status edits are untested; do not claim two passing final runs. Detailed necessary/redundant check review and prior failures are in docs/verification.md. No commit was made.
-
-The live model has recorded authenticated success from November 12, using labeled synthetic AAPL data and gpt-6-luna for both roles: analyst wait/downward/sufficient, reviewer reject_unsupported_signal, zero orders. Current live authentication is unverified: root .env has a key assignment, this terminal lacks the environment variable, and the backend does not auto-load .env. No new model request was made. A later authorized follow-up should first confirm configuration, then use only the smallest relevant check; avoid rerunning the million-row benchmark for UI/provider-fixture corrections.
-
-## Latest model verification — prompt 28
-
-The student subsequently authorized privately loading the existing .env key and ONE live model request, but no full suite. The normal backend was restarted on 8000 with the key inherited privately; Vue remains on 5173. One POST /api/decisions against an isolated copy of the retained synthetic AAPL chart fixture returned HTTP 201 in 2.36 seconds, with real gpt-6-luna analyst wait/downward/sufficient and reviewer reject_unsupported_signal. Saved decision dec_3e08ce3484904313894a9573970f0425 matches SQLite, remains ineligible after reviewer veto, and created zero orders. Temporary 8018 backend was stopped. No other tests were run. Key value was never displayed or written to new files. Reload the existing .env assignment privately on future backend restarts; the latest reconnect edit is still untested. Detailed evidence is in docs/verification.md.
-
-## Commit handoff — November 15, 2026
-
-The student authorized committing/pushing all pending changes to ui-rework, without further tests. Commit scope includes continuous market.db migration/storage, backend-owned collection and session scheduling, bounded history and chart updates, closed-market loading/proxy fixes, readiness/reconnect changes, verification scripts, prompts and documentation. The latest reconnect changes remain untested. No tests/builds/provider calls were run for this commit task, and [skip ci] is used to skip the push workflow. Credentials, databases and local evidence stay ignored. See docs/verification.md for the actual live-model success and the full regression's remaining reconnect limitation.
-
-## Latest change — maximum Daily history (November 15, prompt 30)
-
-Daily now has a separate full Yahoo daily-history source/cache (backend/daily_history.py, schema version 3), while complete recent days and the forming live day retain minute aggregation. Added Earliest (actual provider date) navigation, bounded historical pages/indicator context, daily revision socket cursors and cache/loading/failure metadata. Changed README/design notes and saved prompt 30. No dependency changes. New work is uncommitted after 31c3ce7.
-
-Restarted the normal backend with the existing .env key loaded privately; process 20840 reported Application startup complete on 8000. Vue remains on 5173. Daily maximum-history retrieval runs as normal application backfill, not a test. No tests/builds/manual verification or model requests were run, per the student instruction. Actual provider earliest date and the new navigation/reconciliation remain unverified. Review the Daily interval and Earliest control when resuming; do not start tests without the student superseding the restriction.
-
-## Commit review — November 15, prompt 36
-
-The student authorized committing/pushing the pending ui-rework changes, including history caches/migrations, interval navigation, Shift-wheel panning, updated evidence/design instructions, report outline and prompts. Reviewed changes and ignored secrets/runtime artifacts. Remote matched local base 31c3ce7 before committing. No new tests/builds/provider calls; use [skip ci] for this push. Earlier unverified live-range/navigation and regular-session evidence limitations remain. See the final Git result for the resulting commit; never add .env or local databases.
-
-## Latest change — Ask about chart repaired (November 15, prompt 37)
-
-Uncommitted changes after eec27a4: backend/decisions.py, frontend/src/main.js and chartAdapter.js, focused backend/check_chart_analysis.py, --decisions-only and optional --live-model modes in scripts/smoke-test.mjs, README/design/verification notes and prompt 37. Confirmed production failures were provider HTTP 400 because 1,950 candles exceeded 10,000 JSON values. Analysis now freezes at most 200 completed candles, captures that exact snapshot, guards bulk refresh/chart switches, clears stale state, bounds requests and checks provider JSON locally. Account/strategy rules remain unchanged.
-
-Six backend regressions passed. The offline browser check had one initial fixture-readiness failure, corrected by a bounded enabled-control wait; rerun passed. A final rerun specifically verified a newly added concurrent bulk-refresh guard and passed. One real model request on isolated synthetic candles also passed: analyst wait/downward/sufficient, reviewer reject_unsupported_signal, matching SQLite and preview PNG, zero orders/fills. All test processes closed. No full suite/benchmark was run. Normal services were started with the fix on 8000 and 5173; .env key loaded privately. See verification.md for exact commands, observations, retained failure evidence and limits. No dependency or schema change, no commit. Next task: review the scoped diff with the student before any commit; do not repeat successful checks without a new relevant change or failure.
-
-## Latest change — interval loading/prefetch (November 15, prompt 40)
-
-Preserved prior uncommitted chart-analysis/report work. Added frontend/src/historyCache.js, scripts/check-history-cache.mjs and prompt 40; changed main.js/chartAdapter, backend main/history/socket handling and check_recent_history, focused browser modes and documentation. Recent history is nonblocking; initial chart/prefetch windows are 500 bars, local-only prefetch is serial, the chart is reused, and cache revisions stay fresh. Consistent SQLite reads plus a per-backend stream ID/cursors bridge HTTP and live updates without duplicate history. Older paging and original full-range policy remain; indicator warm-up/capture, Replay and account rules are preserved.
-
-Four cache tests, the focused backend loader/cursor check, --intervals-only real-browser check and offline --decisions-only regression passed. Cached fixture switch measured 16 ms with foreground HTTP held. Older 1,950 bars, live 101→103/Unknown volume and zero orders agreed with SQLite. Final chart-analysis rerun additionally verified old indicator data cannot expand the frozen image. Test services/browser were cleaned up; no full suite/benchmark/live API request. Details/commands and limits are in verification.md. No dependencies/migration/commit. Normal backend restarted as process 26968/session 80434; normal Vue remains on 5173. Next task: student review of the scoped diff before any commit; do not repeat successful checks without a new issue. Actual regular-session Yahoo observation-to-chart evidence remains pending.
-
-## Latest fix — hourly history (November 15, prompt 41)
-
-An actual Yahoo empty hourly response produced the generic ValueError notice; production had zero native hourly bars. A fresh request succeeded, indicating intermittent upstream availability rather than a reproducible chart error. interval_history.py now permits one 60m fallback inside the 729-day boundary only after an empty 1h response, with safe actionable failure reasons and no retry loop. Existing storage/validation and cached history are preserved. Four focused offline tests in backend/check_hourly_history.py passed; no broad suite or model call. Updated README/history notes and prompt 41. All prior changes remain uncommitted.
-
-Normal backend restarted as process 29840/session 22589 with the existing key loaded privately. Clicked Latest on the actual Hourly dashboard: Yahoo refresh status ok, SQLite 3,464 native hourly bars from November 18, 2024 through November 13, 2026, browser 500 candles/Earliest 2024-11-18/error gone/market closed/socket connected. This is real HTTP history, not in-session stream evidence. One disposable diagnostic-copy cleanup failure was corrected and documented. Normal Vue remains on 5173; no account or order control was used. Next task: student review of current diff before any commit; no need to repeat the passing hourly checks without a new failure.
-
-## Commit/push handoff — November 15, prompt 42
-
-The student approved committing and pushing all pending ui-rework work, including chart-analysis fixes, interval caching/prefetch/catch-up, hourly recovery, focused tests, report edits and documentation/prompts. Reviewed scope and ignored credential/runtime paths; remote matched base eec27a4 before committing. No additional tests or provider calls for this Git task; [skip ci] prevents new test CI. Earlier recorded passes and pending actual regular-session Yahoo/voice evidence remain authoritative. See the final Git result for the new commit and push status.
-
-## Latest branding — November 15, prompt 43
-
-The application is now named Plunderer's Port. Updated the header (P mark), browser title, FastAPI title, README and design heading; preserved the student's matching report edit. Browser title/header/screenshot verified the visible result. No logic/dependency/data changes or test suite. Normal backend restarted as process 9208/session 56368; Vue remains on 5173. Prompt 43 and verification notes record the change; it is uncommitted for student review. Existing checkout paths and earlier historical evidence retain their original names where appropriate.
-
-## Latest logo — November 15, prompt 44
-
-Replaced the P header badge with the user's original treasure-map image from Downloads/yar.png, copied unchanged to frontend/src/assets/treasure-map.png. Frontend main.js imports it; style.css uses a 38x38 image box with contain sizing and no circular badge background. Browser DOM/screenshot verified that the image loads and is visible next to Plunderer's Port. No dependencies, tests/builds, backend changes or restart. Prior branding/report edits preserved; all current changes remain uncommitted.
-
-## Commit/push handoff — November 15, prompt 45
-
-The student approved committing/pushing all pending branding/logo/report/documentation changes on ui-rework. Reviewed the Plunderer's Port name and original treasure-map image, preserved report edits, and confirmed secrets/local databases stay ignored. Remote matched base f103b0c. No additional tests or provider calls for this Git task; [skip ci] avoids a new push test run. See final Git result for the resulting commit/push. Previous chart/source/voice evidence and limitations remain unchanged.
+1. Review the complete dirty diff and student's report before deciding what to commit. Once reviewed/committed/pushed, inspect the hosted workflow and artifact upload. No hosted CI pass is claimed now; do not infer one from the old base commit's skip-ci tag or the local suite.
+2. Complete the Part 4.1 live-source chain during a bounded regular-session observation: actual Yahoo message -> observation/receipt IDs -> effective candle -> backend/WebSocket -> visible chart. Record time/source/age/completion and corresponding volume or its absence. Show real upstream failure/staleness separately from the still-connected local socket, retaining cached history. Do not substitute a download or fixture.
+3. Verify authenticated SDK chat if requested; keep that separate from the earlier successful real image-model call on synthetic candles. When working hardware is available, verify two-way voice and microphone release.
+4. Further indicators, parameter research, corporate-action/cost/executable-price models or live brokerage execution are new scope. Backtest results establish tested rules/accounting/reproducibility under stated assumptions, not future profitability. Do not enable live trades without a separately reviewed requirement.

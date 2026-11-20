@@ -1,0 +1,19 @@
+{
+  "label": "Constructed offline browser fixture; no live Yahoo/model call.",
+  "desktop": {
+    "width": 1009,
+    "height": 871,
+    "chart_last": true,
+    "tools_in_sidebar": true,
+    "page_overflow": false
+  },
+  "mobile": {
+    "width": 390,
+    "height": 844,
+    "chart_last": true,
+    "tools_before_chart": true,
+    "page_overflow": false
+  },
+  "indicator_create_update_sqlite_checked": true,
+  "same_chart_canvas": true
+}

@@ -19,6 +19,10 @@ async def check():
                           MARKET_TEST_FEED='0',MARKET_MANUAL_TEST_FEED='0',MARKET_CANDLE_FILE='')
         from backend import main
         now=datetime(2026,11,13,21,1,tzinfo=timezone.utc)
+        class ClosedSessionClock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return now.astimezone(tz) if tz is not None else now.replace(tzinfo=None)
         candle=dict(timestamp='2026-11-13T20:59:00Z',open=100,high=103,low=99,close=102,volume=25)
         calls=[]
         release=Event()
@@ -30,7 +34,9 @@ async def check():
         async def selection():
             return await main.history(symbol='AAPL',timeframe='1m',as_of=None,limit=2000,before=None,start=None,recent=True)
         try:
-            with patch.object(main,'fetch_recent',download):
+            # Cold-selection behavior still uses as_of=None; only the fixture's
+            # history clock is fixed to its closed session, never the host clock.
+            with patch.object(main,'fetch_recent',download), patch('backend.recorded_history.datetime',ClosedSessionClock):
                 a,b=await asyncio.wait_for(asyncio.gather(selection(),selection()),timeout=2)
                 assert a['candles']==b['candles']==[], 'cold selections return promptly without waiting for Yahoo'
                 release.set()

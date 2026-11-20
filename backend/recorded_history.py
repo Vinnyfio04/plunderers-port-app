@@ -1,6 +1,8 @@
 """Bounded history from indexed effective minute candles."""
 from datetime import datetime, timezone
 import json
+from contextlib import nullcontext
+from types import SimpleNamespace
 from backend.market_store import MarketRecorder
 from backend.candle_store import read_minutes, candle_dict, stamp, session_bounds
 from backend.timeframe_history import MinuteRecord, aggregate_timeframe
@@ -9,7 +11,7 @@ from backend.daily_history import page as daily_page
 from backend.interval_history import page as interval_page, POLICIES, window_start
 
 
-def recorded_history(database, symbol, timeframe, as_of=None, limit=2000, before=None, start=None, apply_policy=False):
+def recorded_history(database, symbol, timeframe, as_of=None, limit=2000, before=None, start=None, apply_policy=False, connection=None):
     now = as_of or datetime.now(timezone.utc)
     if apply_policy and POLICIES[timeframe]['lookback_days']:
         floor = window_start(timeframe,now)
@@ -17,9 +19,10 @@ def recorded_history(database, symbol, timeframe, as_of=None, limit=2000, before
             start = floor
     multiplier = {'1m':1,'5m':5,'15m':15,'1h':60,'1d':390}[timeframe]
     minute_limit = min(20000 if timeframe=='1m' else 10000, limit*multiplier+multiplier)
-    with MarketRecorder(database) as recorder:
+    with (nullcontext(SimpleNamespace(connection=connection)) if connection is not None else MarketRecorder(database)) as recorder:
         c = recorder.connection
-        c.execute('BEGIN')  # Rows and revision cursors must describe one committed snapshot.
+        if not c.in_transaction:
+            c.execute('BEGIN')  # Rows and revision cursors describe one committed snapshot.
         rows = read_minutes(c,symbol,minute_limit,before,start,as_of)
         watermark = c.execute('SELECT COALESCE(MAX(revision_id),0) FROM candle_revisions').fetchone()[0]
         tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}

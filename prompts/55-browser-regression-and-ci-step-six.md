@@ -1,0 +1,5 @@
+# Approved step 6 — repeatable browser and GitHub Actions checks
+
+Student: “Go ahead with step 6. Stop when it is complete and wait for my approval before starting step 7.”
+
+Continue the staged plan's browser/CI step. Keep existing browser regressions; make the reference SMA/batch/incremental/unfinished-candle checks, known accounting examples, causal backtests/persistence, frontend policy/build and real-browser operations run automatically on pushes. Close meaningful gaps around saved backtest restart persistence, audit pagination and idempotent retry after a lost response. Reuse installed dependencies and disposable MARKET_DATABASE stores; keep model/provider boundaries offline and credentials out of logs/artifacts. Verify the same commands locally, record failures and corrections, and clearly distinguish local passes from an unrun hosted workflow. No unreviewed commit/push, no production data changes, no step 7 final documentation/handoff package before approval. Standing prompt/verification/current-stage notes still apply.

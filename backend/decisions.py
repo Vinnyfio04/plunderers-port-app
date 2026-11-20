@@ -17,6 +17,7 @@ from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from backend.indicators import IndicatorStore, instance_with_values
+from backend.sma_engine import calculate_crossover
 from backend.paper_trading import PaperAccount
 from backend.timeframe_history import CANDLE_FIELDS, SUPPORTED_TIMEFRAMES
 
@@ -174,67 +175,6 @@ def _validate_candles(candles: Any, cutoff: str) -> list[dict[str, Any]]:
     return normalized
 
 
-def calculate_crossover(indicators: list[dict[str, Any]], cutoff: str) -> dict[str, Any]:
-    sma = sorted(
-        (item for item in indicators if item["type"] == "sma"),
-        key=lambda item: (item["settings"]["window"], item["indicator_id"]),
-    )
-    if len(sma) < 2:
-        return {
-            "signal": "none",
-            "available": False,
-            "reason": "Two SMA instances with different windows are required.",
-        }
-    fast, slow = sma[0], sma[-1]
-    if fast["settings"]["window"] == slow["settings"]["window"]:
-        return {
-            "signal": "none",
-            "available": False,
-            "reason": "The fast and slow SMA windows must differ.",
-        }
-    fast_values = {point["timestamp"]: point["value"] for point in fast["values"]}
-    slow_values = {point["timestamp"]: point["value"] for point in slow["values"]}
-    usable_times = [
-        timestamp
-        for timestamp in fast_values
-        if timestamp <= cutoff
-        and fast_values[timestamp] is not None
-        and slow_values.get(timestamp) is not None
-    ]
-    if len(usable_times) < 2:
-        return {
-            "signal": "none",
-            "available": False,
-            "reason": "The selected cutoff does not have two comparable SMA values.",
-            "fast": fast["name"],
-            "slow": slow["name"],
-        }
-    previous_time, current_time = usable_times[-2:]
-    previous_delta = fast_values[previous_time] - slow_values[previous_time]
-    current_delta = fast_values[current_time] - slow_values[current_time]
-    signal = "none"
-    if previous_delta <= 0 < current_delta:
-        signal = "upward"
-    elif previous_delta >= 0 > current_delta:
-        signal = "downward"
-    return {
-        "signal": signal,
-        "available": True,
-        "fast": fast["name"],
-        "slow": slow["name"],
-        "previous": {
-            "timestamp": previous_time,
-            "fast": fast_values[previous_time],
-            "slow": slow_values[previous_time],
-        },
-        "current": {
-            "timestamp": current_time,
-            "fast": fast_values[current_time],
-            "slow": slow_values[current_time],
-        },
-    }
-
-
 @dataclass(frozen=True)
 class PngImage:
     content: bytes
@@ -292,6 +232,8 @@ class DecisionStore:
         cutoff: str,
         candles: Any,
         context: dict | None = None,
+        fast_id=None,
+        slow_id=None,
     ) -> dict[str, Any]:
         normalized_symbol = str(symbol).strip().upper()
         if not normalized_symbol:
@@ -340,7 +282,19 @@ class DecisionStore:
                 "order_count": len(paper["orders"]),
             },
         }
-        snapshot["python_crossover"] = calculate_crossover(indicators, cutoff)
+        pair = indicators
+        if fast_id is not None or slow_id is not None:
+            try:
+                fast_id, slow_id = int(fast_id), int(slow_id)
+            except (TypeError, ValueError) as error:
+                raise ValueError('Both selected SMA IDs are required.') from error
+            fast = next((item for item in indicators if item['indicator_id'] == fast_id), None)
+            slow = next((item for item in indicators if item['indicator_id'] == slow_id), None)
+            if not fast or not slow or fast['type'] != 'sma' or slow['type'] != 'sma' or fast['settings']['window'] >= slow['settings']['window']:
+                raise ValueError('The selected SMA pair is unavailable or its fast length is not smaller than slow.')
+            pair = [fast, slow]
+            snapshot['sma_pair'] = dict(fast_id=fast['indicator_id'], slow_id=slow['indicator_id'])
+        snapshot["python_crossover"] = calculate_crossover(pair, cutoff)
         visible = {c['timestamp'] for c in normalized_candles}
         for item in indicators:
             item['values'] = [point for point in item['values'] if point['timestamp'] in visible]

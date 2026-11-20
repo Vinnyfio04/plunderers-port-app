@@ -1,19 +1,31 @@
-name: Offline SmokeTest
+name: Offline strategy and browser checks
 
-on: push
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: offline-checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   smoke-test:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v7
+        id: python
         with:
           python-version: '3.13'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
@@ -23,5 +35,21 @@ jobs:
         run: python -m pip install -r backend/requirements.txt
       - name: Install existing frontend dependencies
         run: npm ci --prefix frontend
-      - name: Run offline browser SmokeTest
-        run: node scripts/smoke-test.mjs
+      - name: Run the same complete checks as local development
+        env:
+          SMOKE_PYTHON: ${{ steps.python.outputs.python-path }}
+          OPENAI_API_KEY: ''
+          MARKET_LIVE_FEED: '0'
+        run: node scripts/check-project.mjs
+      - name: Retain offline check logs and browser evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: offline-checks-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            backend/data/check-runs/**/summary.json
+            backend/data/check-runs/**/*.log
+            backend/data/check-runs/**/evidence/**
+            backend/data/smoke-runs/**/failure.png

@@ -10,7 +10,7 @@
 
 ## Recent Commit
 
-- `eec27a4d37a1418aa0ef96aa585b1e86aad1bc63` — Extend market history and add Shift-wheel chart panning `[skip ci]`
+- `3866209f6d28b842db2bc56e262ae2e05f7d578c` — Brand Plunderer's Port with treasure-map logo `[skip ci]`
 
 ## What was completed
 

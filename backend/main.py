@@ -41,6 +41,11 @@ from backend.timeframe_history import (
     load_minute_records,
 )
 from backend.voice import create_live_session, decision_summary, list_decision_summaries
+from backend.chat_agent import run_chat
+from backend.sma_engine import crossover_series
+from backend.accounting import quote_entry
+from backend.backtesting import settings as backtest_settings, run_backtest, digest as backtest_digest
+from backend.backtest_store import BacktestStore, RequestConflict, load_dataset
 
 
 DATABASE_PATH = database_path()
@@ -61,7 +66,7 @@ writer_loop = None
 
 @app.middleware('http')
 async def serialize_mutations(request, call_next):
-    if request.method in ('POST','PUT','PATCH','DELETE') and request.url.path not in ('/api/decisions','/api/voice-sessions'):
+    if request.method in ('POST','PUT','PATCH','DELETE') and request.url.path not in ('/api/decisions','/api/voice-sessions','/api/chat','/api/strategy-signals') and not request.url.path.startswith('/api/backtests'):
         return await writer.run(lambda:call_next(request))
     return await call_next(request)
 candle_hub = CandleHub(database_path=DATABASE_PATH, paper_account=paper_account)
@@ -97,6 +102,66 @@ recent_history_tasks = {}
 recent_history_attempts = {}
 daily_history_tasks = {}
 interval_history_tasks = {}
+backtest_store = BacktestStore(DATABASE_PATH)
+backtest_lock = asyncio.Lock()
+
+
+async def execute_backtest(payload, original_run=None):
+    request_id = payload.get('request_id')
+    if not isinstance(request_id, str) or not request_id.strip() or len(request_id) > 128:
+        raise HTTPException(status_code=422, detail='A backtest request_id of 1–128 characters is required.')
+    try:
+        config = backtest_settings(payload) if original_run is None else backtest_store.get(original_run)['settings']
+        request_hash = backtest_digest(dict(settings=config, original_run=original_run))
+        previous = backtest_store.existing(request_id, request_hash)
+        if previous:
+            return previous
+        if backtest_lock.locked():
+            raise HTTPException(status_code=409, detail='Another backtest is running; retry with the same request ID.')
+        async with backtest_lock:
+            if original_run is None:
+                config, dataset = await asyncio.to_thread(load_dataset, DATABASE_PATH, config)
+            else:
+                dataset = backtest_store.dataset(original_run)
+            result = await asyncio.to_thread(run_backtest, config, dataset)
+            return await writer.run(lambda: backtest_store.save(request_id, request_hash, dataset, result))
+    except RequestConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail='Stored backtest not found.') from error
+    except (ValueError, TypeError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post('/api/backtests', status_code=201)
+async def create_backtest(payload: dict[str, Any] = Body(...)):
+    return await execute_backtest(payload)
+
+
+@app.post('/api/backtests/{run_id}/rerun', status_code=201)
+async def rerun_backtest(run_id: str, payload: dict[str, Any] = Body(...)):
+    return await execute_backtest(payload, run_id)
+
+
+@app.get('/api/backtests')
+def list_backtests(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)):
+    return dict(runs=backtest_store.list(limit, offset), limit=limit, offset=offset)
+
+
+@app.get('/api/backtests/{run_id}')
+def get_backtest(run_id: str):
+    try:
+        return backtest_store.get(run_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail='Stored backtest not found.') from error
+
+
+@app.get('/api/backtests/{run_id}/dataset')
+def get_backtest_dataset(run_id: str):
+    try:
+        return backtest_store.dataset(run_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail='Stored backtest not found.') from error
 
 
 def request_interval_history(symbol, interval):
@@ -265,6 +330,7 @@ def create_decision_snapshot(payload: dict[str, Any] = Body(...)) -> dict[str, A
             cutoff=str(payload.get("cutoff", "")),
             candles=payload.get("candles"),
             context=context,
+            fast_id=payload.get('fast_id'), slow_id=payload.get('slow_id'),
         )
     except (ValueError,KeyError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -367,6 +433,30 @@ def decision_capture(decision_id: str) -> FileResponse:
 @app.get("/api/saved-decisions")
 def saved_decisions(symbol: str = Query(HISTORY_SYMBOL, min_length=1)) -> list[dict[str, Any]]:
     return list_decision_summaries(DATABASE_PATH, symbol.upper())
+
+
+@app.post("/api/chat")
+async def workstation_chat(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    message = str(payload.get("message", "")).strip()
+    if not message or len(message) > 2000:
+        raise HTTPException(status_code=422, detail="Enter a chat message between 1 and 2,000 characters.")
+    chart = payload.get("chart")
+    if chart is not None:
+        if not isinstance(chart, dict):
+            raise HTTPException(status_code=422, detail="Captured chart context must be an object.")
+        required = ("snapshot_id", "symbol", "timeframe", "cutoff", "image_data_url")
+        if any(not isinstance(chart.get(key), str) or not chart[key] for key in required):
+            raise HTTPException(status_code=422, detail="Captured chart context is incomplete; recapture it.")
+        if chart.get("data_mode") not in ("live", "replay"):
+            raise HTTPException(status_code=422, detail="Captured chart data mode must be live or replay.")
+    try:
+        return await run_chat(message, chart, create_decision, payload.get("conversation_id"))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except TimeoutError as error:
+        raise HTTPException(status_code=504, detail="The assistant timed out; retry the captured-chart request.") from error
+    except Exception as error:
+        raise HTTPException(status_code=502, detail="The assistant service failed. Check the backend provider configuration and retry.") from error
 
 
 @app.post("/api/voice-sessions", status_code=201)
@@ -558,6 +648,63 @@ def replay_selections() -> dict[str, Any]:
 @app.get("/api/indicator-types")
 def available_indicator_types() -> dict[str, Any]:
     return indicator_type_contracts()
+
+
+@app.post('/api/strategy-signals')
+def strategy_signals(payload: dict[str, Any] = Body(...)):
+    """Read-only preview math. Live context is verified; Replay uses its supplied prefix."""
+    try:
+        symbol = payload.get('symbol')
+        timeframe = payload.get('timeframe')
+        mode = payload.get('data_mode')
+        quantity = payload.get('quantity', 1)
+        if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
+            raise ValueError('Strategy quantity must be a positive whole number.')
+        if symbol != HISTORY_SYMBOL or timeframe not in SUPPORTED_TIMEFRAMES or mode not in ('live', 'replay'):
+            raise ValueError('Unsupported strategy chart context.')
+        fast = indicator_store.get(int(payload['fast_id']))
+        slow = indicator_store.get(int(payload['slow_id']))
+        if any(item.symbol != symbol or item.timeframe != timeframe or item.indicator_type != 'sma' for item in (fast, slow)):
+            raise ValueError('Select two saved SMAs for this chart.')
+        if fast.settings['window'] >= slow.settings['window']:
+            raise ValueError('Fast SMA length must be smaller than slow SMA length.')
+        candles, status = payload['candles'], payload['status']
+        if not isinstance(candles, list) or not 1 <= len(candles) <= 6000 or not isinstance(status, list):
+            raise ValueError('Strategy context must contain 1–6000 candles and completion flags.')
+        visible = {item['timestamp'] for item in candles}
+        prices = {item['timestamp']: item['close'] for item in candles}
+        if len(status) > 6000 or {item['timestamp'] for item in status} != visible:
+            raise ValueError('Completion flags must match the supplied chart prefix.')
+        if any(not isinstance(item.get('interval_ended'), bool) or not isinstance(item.get('coverage_complete'), bool) for item in status):
+            raise ValueError('Chart completion and coverage flags must be explicit booleans.')
+        client_flags = {item['timestamp']: item for item in status}
+        # UTC parsing rejects malformed/naive timestamps before any history read.
+        for candle in candles:
+            parse_utc(candle['timestamp'])
+        if mode == 'live':
+            from datetime import timedelta
+            end = (parse_utc(candles[-1]['timestamp']) + timedelta(minutes={'1m':1,'5m':5,'15m':15,'1h':60,'1d':1440}[timeframe])).isoformat()
+            context = history_result(timeframe, limit=min(16000, len(candles) + slow.settings['window'] + 1), before=end)
+            known = {item['timestamp']: item for item in context['candles']}
+            if any(known.get(item['timestamp']) != item for item in candles):
+                raise HTTPException(status_code=409, detail='Chart changed before signal calculation; wait for the next chart refresh.')
+            candles, status = context['candles'], context['status']
+            # Never promote a still-forming/partial chart view ahead of its socket update.
+            status = [{**item, 'interval_ended': False}
+                      if item['timestamp'] in client_flags and not (
+                          client_flags[item['timestamp']]['interval_ended'] and client_flags[item['timestamp']]['coverage_complete'])
+                      else item for item in status]
+        first = instance_with_values(fast, candles, status)
+        second = instance_with_values(slow, candles, status)
+        points = crossover_series(first['values'], second['values'])
+        quoted = [{**point, **quote_entry(prices[point['timestamp']], quantity)} for point in points if point['timestamp'] in visible]
+        if any(point['estimated_cost_cents'] > 9007199254740991 for point in quoted):
+            raise ValueError('The requested entry estimate exceeds the browser exact-integer limit.')
+        return dict(fast_id=fast.indicator_id, slow_id=slow.indicator_id, symbol=symbol, quantity=quantity,
+                    timeframe=timeframe, data_mode=mode,
+                    points=quoted)
+    except (KeyError, TypeError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @app.get("/api/indicators")
@@ -855,5 +1002,6 @@ async def stop_candle_hub() -> None:
     await writer.close()
     indicator_store.close()
     decision_store.close()
+    backtest_store.close()
     paper_account.close()
     database_owner.close()

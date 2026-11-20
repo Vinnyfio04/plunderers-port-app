@@ -1,8 +1,18 @@
 # Part 4.1 assignment instructions and current-state comparison
 
-## Latest implementation — Yahoo startup history and reconciliation
+## Current acceptance — November 19, 2026
 
-Live startup now fetches five days of unadjusted Yahoo AAPL regular-session one-minute OHLCV into versioned SQLite storage and serves it through the shared history aggregation. It refreshes every 60 seconds while the regular market is open. Fetch failure retains saved data and returns a visible unavailable-history notice. Fixture/offline startup does not contact Yahoo. The source observation audit is separate and unchanged.
+Part 4.1's supplied live-streaming requirements below are unchanged. The separate seven-stage SMA/simulation/backtesting extension is implemented and locally verified; its [operation, assumptions and acceptance evidence](strategy-workstation.md) are documented separately so a successful simulated strategy test is not mistaken for a live-source demonstration.
+
+Production uses the central backend/data/market.db, additive migrations through schema 5, one backend worker and backend-owned collection. Live startup requests the available history within seven calendar days; longer native intervals use their documented horizons. Cached SQLite candles remain visible during provider failure, with source/age, upstream feed and local FastAPI socket status shown separately. Observation/receipt/revision records remain distinct from downloaded OHLCV and backtest tables. A read-only November 19 inspection confirmed schema 5, one paper account, zero paper orders/fills, five saved decisions and two saved backtests; this is storage metadata, not fresh feed evidence.
+
+The November 19 complete offline command, node scripts/check-project.mjs, passed reference SMA/batch/incremental/unfinished-candle checks, known accounting, causal backtests, UI/API/SQLite consistency, backend restart/retry/pagination, and retained chart/chat/reconnect scenarios. The full browser fixture still ends $1,025 cash, zero shares, $25 realized and three fills. Actual cached Yahoo-origin backtest results were also compared with the visible performance panel. All such evidence is labeled in [verification.md](verification.md); none establishes receipt of a fresh live Yahoo message.
+
+Remaining acceptance gap: capture one actual regular-session Yahoo source message and match it to its receipt IDs, effective SQLite candle, backend/WebSocket update and visible chart, including completion/source-age and corresponding real volume or its documented absence. Demonstrate actual upstream-unavailable/stale status independently from the browser-to-FastAPI connection, retaining cached candles. The full constructed regression covers this behavior with test boundaries; real-source proof remains pending. Hosted GitHub Actions execution also awaits review/commit/push. No Part 4.1 completion or future-profitability claim is made.
+
+## Historical implementation — Yahoo startup history and reconciliation
+
+Live startup fetches the available unadjusted Yahoo AAPL regular-session one-minute OHLCV within seven calendar days into versioned SQLite storage and serves it through the shared history aggregation. It refreshes every 60 seconds while the regular market is open. Fetch failure retains saved data and returns a visible unavailable-history notice. Fixture/offline startup does not contact Yahoo. The source observation audit is separate and unchanged.
 
 Completed Yahoo minute bars replace the entire observed minute; their volume is never added to tick-derived volume. A provisional bar supplies its existing open/high/low; newer source-timestamped quotes extend its high/low and close, and volume becomes unknown until reconciliation. Raw revisions retain fetch availability, so an as-of request cannot see a bar before it was downloaded. This HTTP history evidence is distinguished from actual WebSocket receipt.
 
@@ -54,7 +64,7 @@ Volume uses available cumulative `day_volume` differences within the same UTC da
 
 Closed-market evidence: the offline browser SmokeTest passed; the focused recorded-history test passed for empty state, receipt cutoff, repeat, late broadcast, revision, timer completion, volume uncertainty, disconnect, and database reopen. The real FastAPI WebSocket fixture and Vue browser showed the expected 15:00 OHLC `100/103/100/101`, volume 11 shares, and an upstream disconnect with the local socket still connected. All inputs to those checks were labeled TEST DATA. A five-second actual Yahoo probe opened the connection but received no message. The actual regular-session source-to-chart check and actual volume-bearing Yahoo observation are still pending. Details are in `verification.md`.
 
-## Current acceptance comparison — continuous market implementation
+## Historical acceptance comparison — continuous market implementation
 
 This update supersedes the earlier audit's startup-history and storage gaps. Production now uses `backend/data/market.db`, migrated from the full original store with IDs and prior work preserved. Typed current-minute candles, completion revisions and provenance support indexed bounded chart history; original source payloads and ordered receipts remain available for replay. The backend owns collection and session scheduling even without a browser. Vue reconnects after backend restart, shows full dated UTC labels and closed/next-open status, and appends the next actual session's candles without manufactured overnight data.
 
